@@ -112,6 +112,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -1289,7 +1290,11 @@ class MainViewModel(
         FontScaleBlockRuntime.mode = settings.fontScaleBlockMode
         SoundboardManager.setPlaybackGainPercent(settings.playbackGainPercent)
         SoundboardManager.setAudioFocusAvoidanceMode(appContext, settings.audioFocusAvoidanceMode)
-        BluetoothMediaTitleBridge.setEnabled(appContext, settings.bluetoothMediaTitleSubtitle)
+        BluetoothMediaTitleBridge.setEnabled(
+            appContext,
+            settings.bluetoothMediaTitleSubtitle,
+            quickSubtitleCurrentText
+        )
         if (settings.bluetoothMediaTitleSubtitle) {
             BluetoothMediaTitleBridge.updateSubtitle(appContext, quickSubtitleCurrentText)
         }
@@ -1891,6 +1896,37 @@ class MainViewModel(
         saveQuickSubtitleConfig()
     }
 
+    fun removeQuickSubtitleItems(groupIndex: Int, itemIndexes: Set<Int>): Int {
+        if (groupIndex !in quickSubtitleGroups.indices || itemIndexes.isEmpty()) return 0
+        val group = quickSubtitleGroups[groupIndex]
+        val validIndexes = itemIndexes.filter { it in group.items.indices }.distinct().sortedDescending()
+        if (validIndexes.isEmpty()) return 0
+        val items = group.items.toMutableList()
+        validIndexes.forEach { idx -> items.removeAt(idx) }
+        val next = quickSubtitleGroups.toMutableList()
+        next[groupIndex] = group.copy(items = items)
+        quickSubtitleGroups = next
+        saveQuickSubtitleConfig()
+        return validIndexes.size
+    }
+
+    fun moveQuickSubtitleItemsToGroup(fromGroupIndex: Int, itemIndexes: Set<Int>, toGroupIndex: Int): Int {
+        if (fromGroupIndex !in quickSubtitleGroups.indices || toGroupIndex !in quickSubtitleGroups.indices) return 0
+        if (fromGroupIndex == toGroupIndex || itemIndexes.isEmpty()) return 0
+        val source = quickSubtitleGroups[fromGroupIndex]
+        val target = quickSubtitleGroups[toGroupIndex]
+        val validIndexes = itemIndexes.filter { it in source.items.indices }.distinct().sorted()
+        if (validIndexes.isEmpty()) return 0
+        val movedItems = validIndexes.map { source.items[it] }
+        val remainItems = source.items.filterIndexed { index, _ -> index !in validIndexes }
+        val next = quickSubtitleGroups.toMutableList()
+        next[fromGroupIndex] = source.copy(items = remainItems)
+        next[toGroupIndex] = target.copy(items = target.items + movedItems)
+        quickSubtitleGroups = next
+        saveQuickSubtitleConfig()
+        return movedItems.size
+    }
+
     fun moveQuickSubtitleItem(groupIndex: Int, from: Int, to: Int) {
         if (groupIndex !in quickSubtitleGroups.indices) return
         val g = quickSubtitleGroups[groupIndex]
@@ -2163,11 +2199,43 @@ class MainViewModel(
         if (groupIndex !in soundboardGroups.indices) return
         val group = soundboardGroups[groupIndex]
         if (itemIndex !in group.items.indices) return
+        val removedItemId = group.items[itemIndex].id
         val items = group.items.toMutableList().apply { removeAt(itemIndex) }
         val next = soundboardGroups.toMutableList()
         next[groupIndex] = group.copy(items = items)
         soundboardGroups = next
+        viewModelScope.launch { SoundboardManager.stop(removedItemId) }
         saveSoundboardConfig()
+    }
+
+    fun removeSoundboardItemsByIds(groupIndex: Int, itemIds: Set<Long>): Int {
+        if (groupIndex !in soundboardGroups.indices || itemIds.isEmpty()) return 0
+        val group = soundboardGroups[groupIndex]
+        val removedIds = group.items.mapNotNull { item -> item.id.takeIf { it in itemIds } }.toSet()
+        if (removedIds.isEmpty()) return 0
+        val next = soundboardGroups.toMutableList()
+        next[groupIndex] = group.copy(items = group.items.filterNot { it.id in removedIds })
+        soundboardGroups = next
+        viewModelScope.launch {
+            removedIds.forEach { SoundboardManager.stop(it) }
+        }
+        saveSoundboardConfig()
+        return removedIds.size
+    }
+
+    fun moveSoundboardItemsToGroup(fromGroupIndex: Int, itemIds: Set<Long>, toGroupIndex: Int): Int {
+        if (fromGroupIndex !in soundboardGroups.indices || toGroupIndex !in soundboardGroups.indices) return 0
+        if (fromGroupIndex == toGroupIndex || itemIds.isEmpty()) return 0
+        val source = soundboardGroups[fromGroupIndex]
+        val target = soundboardGroups[toGroupIndex]
+        val movedItems = source.items.filter { it.id in itemIds }
+        if (movedItems.isEmpty()) return 0
+        val next = soundboardGroups.toMutableList()
+        next[fromGroupIndex] = source.copy(items = source.items.filterNot { it.id in itemIds })
+        next[toGroupIndex] = target.copy(items = target.items + movedItems)
+        soundboardGroups = next
+        saveSoundboardConfig()
+        return movedItems.size
     }
 
     fun isSoundboardItemPlaying(itemId: Long): Boolean {
@@ -2567,6 +2635,29 @@ class MainViewModel(
         quickCardDraft = null
         saveQuickCardConfig()
         return true
+    }
+
+    fun deleteQuickCardsByIds(ids: Set<Long>): Int {
+        val targetIds = ids.filterTo(hashSetOf()) { id -> quickCards.any { it.id == id } }
+        if (targetIds.isEmpty()) return 0
+        val selectedId = quickCards.getOrNull(quickCardSelectedIndex)?.id?.takeUnless { it in targetIds }
+        val next = quickCards.filterNot { it.id in targetIds }
+        val removedCount = quickCards.size - next.size
+        if (removedCount <= 0) return 0
+        quickCards = next
+        quickCardSelectedIndex =
+            selectedId
+                ?.let { id -> quickCards.indexOfFirst { it.id == id } }
+                ?.takeIf { it >= 0 }
+                ?: quickCardSelectedIndex.coerceIn(0, quickCards.lastIndex.coerceAtLeast(0))
+        if (quickCardPreviewCardId?.let { it in targetIds } == true) {
+            quickCardPreviewCardId = null
+        }
+        if (quickCardDraft?.editId?.let { it in targetIds } == true) {
+            quickCardDraft = null
+        }
+        saveQuickCardConfig()
+        return removedCount
     }
 
     private fun copyUriToQuickCardImage(uri: android.net.Uri, fileName: String): String? {
@@ -3847,7 +3938,7 @@ class MainViewModel(
 
     fun setBluetoothMediaTitleSubtitle(enabled: Boolean) {
         uiState = uiState.copy(bluetoothMediaTitleSubtitle = enabled)
-        BluetoothMediaTitleBridge.setEnabled(appContext, enabled)
+        BluetoothMediaTitleBridge.setEnabled(appContext, enabled, quickSubtitleCurrentText)
         if (enabled) {
             syncBluetoothMediaTitleToCommittedQuickSubtitle()
         }
@@ -5500,26 +5591,24 @@ private fun QuickCardSortHintOverlay(
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(
-                        horizontal = if (landscape) 54.dp else 38.dp,
-                        vertical = if (landscape) 18.dp else 26.dp
-                    )
-                    .fillMaxWidth(if (landscape) 0.62f else 0.82f)
-                    .heightIn(min = 46.dp)
+                    .fillMaxWidth()
+                    .fillMaxHeight(if (landscape) 0.42f else 0.34f)
                     .background(
                         brush = Brush.verticalGradient(
                             colors = listOf(
                                 Color.Transparent,
                                 Color.Black.copy(alpha = 0.42f)
                             )
-                        ),
-                        shape = RoundedCornerShape(UiTokens.Radius)
+                        )
                     )
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                    .padding(
+                        horizontal = if (landscape) 54.dp else 38.dp,
+                        vertical = if (landscape) 18.dp else 26.dp
+                    ),
                 contentAlignment = Alignment.BottomCenter
             ) {
                 Text(
-                    text = "长按对名片进行排序。",
+                    text = "长按对名片进行排序和管理",
                     color = Color.White.copy(alpha = 0.86f),
                     style = MaterialTheme.typography.caption,
                     textAlign = TextAlign.Center
@@ -5535,18 +5624,77 @@ private fun QuickCardSortScreen(
     onTopBarActionsChange: (QuickCardTopBarActions?) -> Unit,
     onDone: () -> Unit
 ) {
+    val context = LocalContext.current
     val cards = viewModel.quickCards
     val topBlank = UiTokens.PageTopBlank
     val bottomBlank = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 8.dp
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var pendingDeleteIds by remember { mutableStateOf<Set<Long>?>(null) }
 
-    val topActions = remember(onDone) {
-        QuickCardTopBarActions(
-            onConfirm = onDone,
-            canConfirm = true
-        )
+    LaunchedEffect(cards, selectedIds, selectionMode) {
+        val validIds = cards.mapTo(hashSetOf()) { it.id }
+        val filtered = selectedIds.filterTo(hashSetOf()) { it in validIds }
+        if (filtered != selectedIds) selectedIds = filtered
+        if (selectionMode && cards.isEmpty()) {
+            selectionMode = false
+            selectedIds = emptySet()
+        }
+    }
+
+    val topActions = remember(selectionMode, selectedIds, onDone) {
+        if (selectionMode) {
+            QuickCardTopBarActions(
+                onDelete = {
+                    if (selectedIds.isNotEmpty()) pendingDeleteIds = selectedIds
+                },
+                onClose = {
+                    selectionMode = false
+                    selectedIds = emptySet()
+                },
+                canDelete = selectedIds.isNotEmpty(),
+                canClose = true
+            )
+        } else {
+            QuickCardTopBarActions(
+                onConfirm = onDone,
+                canConfirm = true
+            )
+        }
     }
     LaunchedEffect(topActions) {
         onTopBarActionsChange(topActions)
+    }
+
+    pendingDeleteIds?.let { deleteIds ->
+        val count = deleteIds.size
+        AlertDialog(
+            onDismissRequest = { pendingDeleteIds = null },
+            title = { Text("删除名片") },
+            text = {
+                Text(if (count > 1) "确定删除选中的 $count 张名片？" else "确定删除这张名片？")
+            },
+            confirmButton = {
+                Md2TextButton(
+                    onClick = {
+                        pendingDeleteIds = null
+                        val removed = viewModel.deleteQuickCardsByIds(deleteIds)
+                        if (removed > 0) {
+                            selectedIds = selectedIds - deleteIds
+                            if (selectedIds.isEmpty()) selectionMode = false
+                            toast(context, if (removed > 1) "已删除 $removed 张名片" else "已删除名片")
+                        }
+                    }
+                ) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                Md2TextButton(onClick = { pendingDeleteIds = null }) {
+                    Text("取消")
+                }
+            }
+        )
     }
 
     CenteredPageColumn(
@@ -5560,6 +5708,17 @@ private fun QuickCardSortScreen(
                 cards = cards,
                 topBlankHeight = topBlank,
                 bottomBlankHeight = bottomBlank,
+                selectionMode = selectionMode,
+                selectedIds = selectedIds,
+                onEnterSelectionMode = { id ->
+                    selectionMode = true
+                    selectedIds = selectedIds + id
+                },
+                onToggleSelection = { id ->
+                    selectedIds =
+                        if (id in selectedIds) selectedIds - id else selectedIds + id
+                },
+                onDeleteCard = { id -> pendingDeleteIds = setOf(id) },
                 onReorder = { ids ->
                     viewModel.reorderQuickCardsByIds(ids)
                 }
@@ -5573,6 +5732,11 @@ private fun QuickCardSortRecyclerList(
     cards: List<QuickCard>,
     topBlankHeight: Dp,
     bottomBlankHeight: Dp,
+    selectionMode: Boolean,
+    selectedIds: Set<Long>,
+    onEnterSelectionMode: (Long) -> Unit,
+    onToggleSelection: (Long) -> Unit,
+    onDeleteCard: (Long) -> Unit,
     onReorder: (List<Long>) -> Unit
 ) {
     val parentComposition = rememberCompositionContext()
@@ -5580,6 +5744,9 @@ private fun QuickCardSortRecyclerList(
     val topBlankPx = with(density) { topBlankHeight.roundToPx() }
     val bottomBlankPx = with(density) { bottomBlankHeight.roundToPx() }
     val onReorderState = rememberUpdatedState(onReorder)
+    val onEnterSelectionModeState = rememberUpdatedState(onEnterSelectionMode)
+    val onToggleSelectionState = rememberUpdatedState(onToggleSelection)
+    val onDeleteCardState = rememberUpdatedState(onDeleteCard)
 
     AndroidView(
         modifier = modifier,
@@ -5613,6 +5780,9 @@ private fun QuickCardSortRecyclerList(
                     recyclerView: RecyclerView,
                     viewHolder: RecyclerView.ViewHolder
                 ): Int {
+                    if (adapter.selectionMode) {
+                        return makeMovementFlags(0, 0)
+                    }
                     if (viewHolder.bindingAdapterPosition == 0) {
                         return makeMovementFlags(0, 0)
                     }
@@ -5676,10 +5846,17 @@ private fun QuickCardSortRecyclerList(
             val touchHelper = ItemTouchHelper(touchCallback)
             touchHelper.attachToRecyclerView(recycler)
             adapter.onStartDrag = { vh -> touchHelper.startDrag(vh) }
+            adapter.onEnterSelectionMode = { id -> onEnterSelectionModeState.value(id) }
+            adapter.onToggleSelection = { id -> onToggleSelectionState.value(id) }
+            adapter.onDeleteCard = { id -> onDeleteCardState.value(id) }
             recycler
         },
         update = { recycler ->
             val adapter = recycler.adapter as? QuickCardSortRecyclerAdapter ?: return@AndroidView
+            adapter.onEnterSelectionMode = { id -> onEnterSelectionModeState.value(id) }
+            adapter.onToggleSelection = { id -> onToggleSelectionState.value(id) }
+            adapter.onDeleteCard = { id -> onDeleteCardState.value(id) }
+            adapter.updateSelectionState(selectionMode, selectedIds)
             recycler.setPadding(recycler.paddingLeft, topBlankPx, recycler.paddingRight, bottomBlankPx)
             recycler.post {
                 adapter.submitFromState(cards)
@@ -5693,8 +5870,13 @@ private class QuickCardSortRecyclerAdapter(
 ) : RecyclerView.Adapter<QuickCardSortRecyclerAdapter.ItemViewHolder>() {
     private val items = mutableListOf<QuickCard>()
     var isDragging: Boolean = false
+    var selectionMode: Boolean = false
     var onStartDrag: ((RecyclerView.ViewHolder) -> Unit)? = null
+    var onEnterSelectionMode: ((Long) -> Unit)? = null
+    var onToggleSelection: ((Long) -> Unit)? = null
+    var onDeleteCard: ((Long) -> Unit)? = null
     private var draggingItemId: Long? = null
+    private var selectedIds: Set<Long> = emptySet()
 
     private companion object {
         const val HEADER_ID = Long.MIN_VALUE + 4601L
@@ -5732,11 +5914,16 @@ private class QuickCardSortRecyclerAdapter(
         holder.bind(
             card = card,
             isDragged = draggingItemId == card.id,
+            selectionMode = selectionMode,
+            selected = card.id in selectedIds,
             onStartDrag = {
                 if (holder.bindingAdapterPosition != RecyclerView.NO_POSITION) {
                     onStartDrag?.invoke(holder)
                 }
-            }
+            },
+            onEnterSelectionMode = { onEnterSelectionMode?.invoke(card.id) },
+            onToggleSelection = { onToggleSelection?.invoke(card.id) },
+            onDelete = { onDeleteCard?.invoke(card.id) }
         )
     }
 
@@ -5759,6 +5946,13 @@ private class QuickCardSortRecyclerAdapter(
     }
 
     fun snapshotIds(): List<Long> = items.map { it.id }
+
+    fun updateSelectionState(selectionMode: Boolean, selectedIds: Set<Long>) {
+        if (this.selectionMode == selectionMode && this.selectedIds == selectedIds) return
+        this.selectionMode = selectionMode
+        this.selectedIds = selectedIds.toSet()
+        notifyDataSetChanged()
+    }
 
     fun setDraggingPosition(position: Int) {
         val targetId = items.getOrNull(position - 1)?.id
@@ -5794,14 +5988,24 @@ private class QuickCardSortRecyclerAdapter(
         fun bind(
             card: QuickCard,
             isDragged: Boolean,
-            onStartDrag: () -> Unit
+            selectionMode: Boolean,
+            selected: Boolean,
+            onStartDrag: () -> Unit,
+            onEnterSelectionMode: () -> Unit,
+            onToggleSelection: () -> Unit,
+            onDelete: () -> Unit
         ) {
             composeView.setContent {
                 KigttsFontScaleProvider {
                     QuickCardSortRow(
                         card = card,
                         isDragged = isDragged,
-                        onStartDrag = onStartDrag
+                        selectionMode = selectionMode,
+                        selected = selected,
+                        onStartDrag = onStartDrag,
+                        onEnterSelectionMode = onEnterSelectionMode,
+                        onToggleSelection = onToggleSelection,
+                        onDelete = onDelete
                     )
                 }
             }
@@ -5829,11 +6033,16 @@ private fun QuickCardSortHeaderRow() {
 }
 
 @Composable
-@OptIn(ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class)
 private fun QuickCardSortRow(
     card: QuickCard,
     isDragged: Boolean,
-    onStartDrag: () -> Unit
+    selectionMode: Boolean,
+    selected: Boolean,
+    onStartDrag: () -> Unit,
+    onEnterSelectionMode: () -> Unit,
+    onToggleSelection: () -> Unit,
+    onDelete: () -> Unit
 ) {
     val rowElevation by animateDpAsState(
         targetValue = if (isDragged) 10.dp else UiTokens.CardElevation,
@@ -5843,51 +6052,95 @@ private fun QuickCardSortRow(
         ),
         label = "quick_card_sort_item_elevation"
     )
+    val cardContainerColor = md2CardContainerColor()
+    val rowBorderColor by animateColorAsState(
+        targetValue = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.78f) else Color.Transparent,
+        animationSpec = tween(140, easing = FastOutSlowInEasing),
+        label = "quick_card_sort_selected_border"
+    )
+    val rowOverlayColor by animateColorAsState(
+        targetValue = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent,
+        animationSpec = tween(140, easing = FastOutSlowInEasing),
+        label = "quick_card_sort_selected_overlay"
+    )
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 2.dp, vertical = 4.dp),
+            .padding(horizontal = 2.dp, vertical = 4.dp)
+            .heightIn(min = 72.dp)
+            .combinedClickable(
+                onClick = {
+                    if (selectionMode) onToggleSelection()
+                },
+                onLongClick = onEnterSelectionMode
+            ),
         shape = RoundedCornerShape(UiTokens.Radius),
-        backgroundColor = md2CardContainerColor(),
+        backgroundColor = cardContainerColor,
         elevation = rowElevation
     ) {
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                .heightIn(min = 72.dp)
+                .background(rowOverlayColor)
+                .border(1.dp, rowBorderColor, RoundedCornerShape(UiTokens.Radius))
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = card.title.ifBlank { "未命名名片" },
-                    style = MaterialTheme.typography.subtitle1,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 72.dp)
+                    .padding(horizontal = 10.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                AnimatedVisibility(
+                    visible = selectionMode,
+                    enter = fadeIn(animationSpec = tween(120)) + expandHorizontally(animationSpec = tween(120)),
+                    exit = fadeOut(animationSpec = tween(100)) + shrinkHorizontally(animationSpec = tween(100))
+                ) {
+                    Checkbox(
+                        checked = selected,
+                        onCheckedChange = { onToggleSelection() }
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = card.title.ifBlank { "未命名名片" },
+                        style = MaterialTheme.typography.subtitle1,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "快捷名片",
+                        style = MaterialTheme.typography.caption,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Md2IconButton(
+                    icon = "delete",
+                    contentDescription = "删除名片",
+                    onClick = onDelete
                 )
-                Text(
-                    text = "快捷名片",
-                    style = MaterialTheme.typography.caption,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                Md2IconButton(
+                    icon = "drag_indicator",
+                    contentDescription = "拖动排序",
+                    onClick = {},
+                    enabled = !selectionMode,
+                    modifier = Modifier.pointerInteropFilter { ev ->
+                        if (selectionMode) return@pointerInteropFilter false
+                        when (ev.actionMasked) {
+                            MotionEvent.ACTION_DOWN -> {
+                                onStartDrag()
+                                true
+                            }
+                            MotionEvent.ACTION_MOVE,
+                            MotionEvent.ACTION_UP,
+                            MotionEvent.ACTION_CANCEL -> true
+                            else -> false
+                        }
+                    }
                 )
             }
-            Md2IconButton(
-                icon = "drag_indicator",
-                contentDescription = "拖动排序",
-                onClick = {},
-                modifier = Modifier.pointerInteropFilter { ev ->
-                    when (ev.actionMasked) {
-                        MotionEvent.ACTION_DOWN -> {
-                            onStartDrag()
-                            true
-                        }
-                        MotionEvent.ACTION_MOVE,
-                        MotionEvent.ACTION_UP,
-                        MotionEvent.ACTION_CANCEL -> true
-                        else -> false
-                    }
-                }
-            )
         }
     }
 }
@@ -8275,6 +8528,7 @@ data class QuickCardTopBarActions(
     val onCopy: (() -> Unit)? = null,
     val onDelete: (() -> Unit)? = null,
     val onConfirm: (() -> Unit)? = null,
+    val onClose: (() -> Unit)? = null,
     val onWebReload: (() -> Unit)? = null,
     val onWebBack: (() -> Unit)? = null,
     val onWebForward: (() -> Unit)? = null,
@@ -8282,6 +8536,7 @@ data class QuickCardTopBarActions(
     val canCopy: Boolean = false,
     val canDelete: Boolean = false,
     val canConfirm: Boolean = false,
+    val canClose: Boolean = false,
     val canWebReload: Boolean = false,
     val canWebBack: Boolean = false,
     val canWebForward: Boolean = false
@@ -8290,6 +8545,14 @@ data class QuickCardTopBarActions(
 data class PresetTopBarActions(
     val onImport: () -> Unit,
     val onExport: () -> Unit
+)
+
+data class EditorBatchTopBarActions(
+    val onMove: () -> Unit,
+    val onDelete: () -> Unit,
+    val onClose: () -> Unit,
+    val canMove: Boolean = true,
+    val canDelete: Boolean = true
 )
 
 private object QuickSubtitleRoutes {
@@ -8543,12 +8806,14 @@ class MainActivity : ComponentActivity() {
                 val text = intent.getStringExtra(OverlayBridge.EXTRA_TEXT).orEmpty()
                 val navigateToPage = intent.getBooleanExtra(OverlayBridge.EXTRA_NAVIGATE_TO_PAGE, true)
                 viewModel.handleQuickSubtitleLaunchRequest(requestId, target, text, navigateToPage)
+                setIntent(Intent())
             }
 
             OverlayBridge.ACTION_REQUEST_RECORD_AUDIO_PERMISSION -> {
                 val startRealtimeOnGrant =
                     intent.getBooleanExtra(OverlayBridge.EXTRA_START_REALTIME_ON_GRANT, false)
                 viewModel.requestRecordAudioPermission(startRealtimeOnGrant)
+                setIntent(Intent())
             }
 
             OverlayBridge.ACTION_SHOW_ACCESSIBILITY_GUIDE -> {
@@ -9748,6 +10013,8 @@ fun AppScaffold(viewModel: MainViewModel) {
     var runningStripCollapsed by rememberSaveable { mutableStateOf(true) }
     var logTopBarActions by remember { mutableStateOf<LogTopBarActions?>(null) }
     var quickCardTopBarActions by remember { mutableStateOf<QuickCardTopBarActions?>(null) }
+    var quickSubtitleEditorBatchTopBarActions by remember { mutableStateOf<EditorBatchTopBarActions?>(null) }
+    var soundboardEditorBatchTopBarActions by remember { mutableStateOf<EditorBatchTopBarActions?>(null) }
     var quickSubtitlePresetExportDialog by remember { mutableStateOf(false) }
     var soundboardPresetExportDialog by remember { mutableStateOf(false) }
     var showBuiltinQuickSubtitlePresetPicker by remember { mutableStateOf(false) }
@@ -10094,6 +10361,16 @@ fun AppScaffold(viewModel: MainViewModel) {
     LaunchedEffect(basePage, settingsLogOpen) {
         if (!settingsLogOpen) {
             logTopBarActions = null
+        }
+    }
+    LaunchedEffect(basePage, quickSubtitleRoute) {
+        if (basePage != pageQuickSubtitle || quickSubtitleRoute != QuickSubtitleRoutes.Editor) {
+            quickSubtitleEditorBatchTopBarActions = null
+        }
+    }
+    LaunchedEffect(basePage, soundboardRoute) {
+        if (basePage != pageSoundboard || soundboardRoute != SoundboardRoutes.Editor) {
+            soundboardEditorBatchTopBarActions = null
         }
     }
     LaunchedEffect(basePage, quickCardEditorOpen) {
@@ -10555,7 +10832,7 @@ fun AppScaffold(viewModel: MainViewModel) {
         } else if (quickCardEditorOpen) {
             "编辑快捷名片"
         } else if (quickCardSortOpen) {
-            "排序名片"
+            "管理名片"
         } else if (quickCardScannerOpen) {
             "扫描二维码"
         } else if (quickCardScanTextOpen) {
@@ -10684,6 +10961,12 @@ fun AppScaffold(viewModel: MainViewModel) {
                         basePage == pageQuickSubtitle && quickSubtitleRoute == QuickSubtitleRoutes.Editor
                     val showSoundboardEditorActions =
                         basePage == pageSoundboard && soundboardRoute == SoundboardRoutes.Editor
+                    val quickSubtitleBatchActions = quickSubtitleEditorBatchTopBarActions
+                    val soundboardBatchActions = soundboardEditorBatchTopBarActions
+                    val showQuickSubtitleEditorBatchActions =
+                        showQuickSubtitleEditorActions && quickSubtitleBatchActions != null
+                    val showSoundboardEditorBatchActions =
+                        showSoundboardEditorActions && soundboardBatchActions != null
                     val showQuickCardMainActions =
                         basePage == pageQuickCard &&
                                 quickCardRoute == QuickCardRoutes.Main
@@ -10760,10 +11043,12 @@ fun AppScaffold(viewModel: MainViewModel) {
                     )
                     val actionsWidthTarget = when {
                         showSettingsLogActions -> 144.dp
+                        showQuickSubtitleEditorBatchActions || showSoundboardEditorBatchActions -> 144.dp
                         showQuickSubtitleEditorActions || showSoundboardEditorActions -> 96.dp
                         showQuickSubtitleCompactEditorAction -> 96.dp
                         showQuickCardMainActions || showQuickCardEditorActions -> 96.dp
-                        showQuickCardSortActions -> 48.dp
+                        showQuickCardSortActions ->
+                            if (quickCardActions?.canClose == true) 96.dp else 48.dp
                         showQuickCardWebActions -> 48.dp
                         showDrawingActions -> 144.dp
                         showQuickSubtitleActions || showVoicePackActions || showSettingsEntryActions -> 48.dp
@@ -10822,23 +11107,44 @@ fun AppScaffold(viewModel: MainViewModel) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.End
                             ) {
-                                IconButton(
-                                    onClick = {
-                                        if (state.useBuiltinFileManager) {
-                                            showBuiltinQuickSubtitlePresetPicker = true
-                                        } else {
-                                            quickSubtitlePresetPicker.launch("*/*")
-                                        }
-                                    },
-                                    enabled = showQuickSubtitleEditorActions
-                                ) {
-                                    MsIcon("folder_open", contentDescription = "导入便捷字幕预设")
-                                }
-                                IconButton(
-                                    onClick = { quickSubtitlePresetExportDialog = true },
-                                    enabled = showQuickSubtitleEditorActions && viewModel.quickSubtitleGroups.isNotEmpty()
-                                ) {
-                                    MsIcon("share", contentDescription = "导出便捷字幕预设")
+                                if (quickSubtitleBatchActions != null) {
+                                    IconButton(
+                                        onClick = quickSubtitleBatchActions.onMove,
+                                        enabled = showQuickSubtitleEditorActions && quickSubtitleBatchActions.canMove
+                                    ) {
+                                        MsIcon("drive_file_move", contentDescription = "移动到其它分组")
+                                    }
+                                    IconButton(
+                                        onClick = quickSubtitleBatchActions.onDelete,
+                                        enabled = showQuickSubtitleEditorActions && quickSubtitleBatchActions.canDelete
+                                    ) {
+                                        MsIcon("delete", contentDescription = "删除所选快捷文本")
+                                    }
+                                    IconButton(
+                                        onClick = quickSubtitleBatchActions.onClose,
+                                        enabled = showQuickSubtitleEditorActions
+                                    ) {
+                                        MsIcon("close", contentDescription = "退出批量管理")
+                                    }
+                                } else {
+                                    IconButton(
+                                        onClick = {
+                                            if (state.useBuiltinFileManager) {
+                                                showBuiltinQuickSubtitlePresetPicker = true
+                                            } else {
+                                                quickSubtitlePresetPicker.launch("*/*")
+                                            }
+                                        },
+                                        enabled = showQuickSubtitleEditorActions
+                                    ) {
+                                        MsIcon("folder_open", contentDescription = "导入便捷字幕预设")
+                                    }
+                                    IconButton(
+                                        onClick = { quickSubtitlePresetExportDialog = true },
+                                        enabled = showQuickSubtitleEditorActions && viewModel.quickSubtitleGroups.isNotEmpty()
+                                    ) {
+                                        MsIcon("share", contentDescription = "导出便捷字幕预设")
+                                    }
                                 }
                             }
                         }
@@ -10852,23 +11158,44 @@ fun AppScaffold(viewModel: MainViewModel) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.End
                             ) {
-                                IconButton(
-                                    onClick = {
-                                        if (state.useBuiltinFileManager) {
-                                            showBuiltinSoundboardPresetPicker = true
-                                        } else {
-                                            soundboardPresetPicker.launch("*/*")
-                                        }
-                                    },
-                                    enabled = showSoundboardEditorActions
-                                ) {
-                                    MsIcon("folder_open", contentDescription = "导入音效板预设")
-                                }
-                                IconButton(
-                                    onClick = { soundboardPresetExportDialog = true },
-                                    enabled = showSoundboardEditorActions && viewModel.soundboardGroups.isNotEmpty()
-                                ) {
-                                    MsIcon("share", contentDescription = "导出音效板预设")
+                                if (soundboardBatchActions != null) {
+                                    IconButton(
+                                        onClick = soundboardBatchActions.onMove,
+                                        enabled = showSoundboardEditorActions && soundboardBatchActions.canMove
+                                    ) {
+                                        MsIcon("drive_file_move", contentDescription = "移动到其它分组")
+                                    }
+                                    IconButton(
+                                        onClick = soundboardBatchActions.onDelete,
+                                        enabled = showSoundboardEditorActions && soundboardBatchActions.canDelete
+                                    ) {
+                                        MsIcon("delete", contentDescription = "删除所选音效")
+                                    }
+                                    IconButton(
+                                        onClick = soundboardBatchActions.onClose,
+                                        enabled = showSoundboardEditorActions
+                                    ) {
+                                        MsIcon("close", contentDescription = "退出批量管理")
+                                    }
+                                } else {
+                                    IconButton(
+                                        onClick = {
+                                            if (state.useBuiltinFileManager) {
+                                                showBuiltinSoundboardPresetPicker = true
+                                            } else {
+                                                soundboardPresetPicker.launch("*/*")
+                                            }
+                                        },
+                                        enabled = showSoundboardEditorActions
+                                    ) {
+                                        MsIcon("folder_open", contentDescription = "导入音效板预设")
+                                    }
+                                    IconButton(
+                                        onClick = { soundboardPresetExportDialog = true },
+                                        enabled = showSoundboardEditorActions && viewModel.soundboardGroups.isNotEmpty()
+                                    ) {
+                                        MsIcon("share", contentDescription = "导出音效板预设")
+                                    }
                                 }
                             }
                         }
@@ -10960,11 +11287,26 @@ fun AppScaffold(viewModel: MainViewModel) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.End
                             ) {
-                                IconButton(
-                                    onClick = { quickCardActions?.onConfirm?.invoke() },
-                                    enabled = showQuickCardSortActions && quickCardActions?.canConfirm == true
-                                ) {
-                                    MsIcon("check", contentDescription = "保存排序并返回")
+                                if (quickCardActions?.canClose == true) {
+                                    IconButton(
+                                        onClick = { quickCardActions.onDelete?.invoke() },
+                                        enabled = showQuickCardSortActions && quickCardActions.canDelete
+                                    ) {
+                                        MsIcon("delete", contentDescription = "删除选中名片")
+                                    }
+                                    IconButton(
+                                        onClick = { quickCardActions.onClose?.invoke() },
+                                        enabled = showQuickCardSortActions
+                                    ) {
+                                        MsIcon("close", contentDescription = "结束选择模式")
+                                    }
+                                } else {
+                                    IconButton(
+                                        onClick = { quickCardActions?.onConfirm?.invoke() },
+                                        enabled = showQuickCardSortActions && quickCardActions?.canConfirm == true
+                                    ) {
+                                        MsIcon("check", contentDescription = "保存排序并返回")
+                                    }
                                 }
                             }
                         }
@@ -11185,6 +11527,7 @@ fun AppScaffold(viewModel: MainViewModel) {
                                 launchSingleTop = true
                             }
                         },
+                        onEditorBatchTopBarActionsChange = { quickSubtitleEditorBatchTopBarActions = it },
                         fullscreenMode = quickSubtitleFullscreen && !quickSubtitleSubPageOpen
                     )
                     pageQuickCard -> QuickCardNavHost(
@@ -11202,7 +11545,8 @@ fun AppScaffold(viewModel: MainViewModel) {
                     pageSoundboard -> SoundboardNavHost(
                         navController = soundboardNavController,
                         viewModel = viewModel,
-                        state = state
+                        state = state,
+                        onEditorBatchTopBarActionsChange = { soundboardEditorBatchTopBarActions = it }
                     )
                     pageSettings -> SettingsNavHost(
                         navController = settingsNavController,
@@ -11580,7 +11924,7 @@ fun AppScaffold(viewModel: MainViewModel) {
             fontWeight = if (viewModel.quickSubtitleBold) FontWeight.Bold else FontWeight.Normal,
             maxFontSizeSp = viewModel.quickSubtitleFontSizeSp,
             autoFitEnabled = state.quickSubtitleAutoFit,
-            rotated180 = viewModel.quickSubtitleRotated180,
+            rotated180 = false,
             startPadding = landscapeChromeStartInset + 16.dp,
             endPadding = landscapeChromeEndInset + 16.dp,
             topPadding = statusTopInset + 6.dp,
@@ -12902,6 +13246,7 @@ private fun QuickSubtitleNavHost(
     pttConfirmOwnedByMainPanel: Boolean,
     onFloatingInputPreviewChange: (QuickSubtitleFloatingInputPreviewState?) -> Unit,
     onOpenHistory: () -> Unit,
+    onEditorBatchTopBarActionsChange: (EditorBatchTopBarActions?) -> Unit,
     fullscreenMode: Boolean
 ) {
     NavHost(
@@ -12978,6 +13323,7 @@ private fun QuickSubtitleNavHost(
         composable(QuickSubtitleRoutes.Editor) {
             QuickSubtitleEditorScreen(
                 viewModel = viewModel,
+                onBatchTopBarActionsChange = onEditorBatchTopBarActionsChange,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -12991,7 +13337,8 @@ private fun QuickSubtitleNavHost(
 private fun SoundboardNavHost(
     navController: NavHostController,
     viewModel: MainViewModel,
-    state: UiState
+    state: UiState,
+    onEditorBatchTopBarActionsChange: (EditorBatchTopBarActions?) -> Unit
 ) {
     NavHost(
         navController = navController,
@@ -13060,6 +13407,7 @@ private fun SoundboardNavHost(
             SoundboardEditorScreen(
                 viewModel = viewModel,
                 state = state,
+                onBatchTopBarActionsChange = onEditorBatchTopBarActionsChange,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -13600,6 +13948,7 @@ private fun SoundboardLayoutDropdownRow(
 private fun SoundboardEditorScreen(
     viewModel: MainViewModel,
     state: UiState,
+    onBatchTopBarActionsChange: (EditorBatchTopBarActions?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -13624,6 +13973,31 @@ private fun SoundboardEditorScreen(
     val groupTabsScrollScope = rememberCoroutineScope()
     val pageEdgeScrollScope = rememberCoroutineScope()
     var pendingScrollToNewGroup by remember { mutableIntStateOf(0) }
+    var batchSelectionMode by remember { mutableStateOf(false) }
+    var selectedItemIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var showBatchDeleteConfirm by remember { mutableStateOf(false) }
+    var showBatchMoveDialog by remember { mutableStateOf(false) }
+
+    fun clearBatchSelection() {
+        batchSelectionMode = false
+        selectedItemIds = emptySet()
+    }
+
+    fun enterBatchSelection(itemId: Long) {
+        batchSelectionMode = true
+        selectedItemIds = selectedItemIds + itemId
+    }
+
+    fun toggleBatchSelection(itemId: Long) {
+        selectedItemIds = if (itemId in selectedItemIds) {
+            selectedItemIds - itemId
+        } else {
+            selectedItemIds + itemId
+        }
+        if (selectedItemIds.isEmpty()) {
+            batchSelectionMode = false
+        }
+    }
 
     suspend fun scrollGroupTabsToEndWhenReady(request: Int) {
         repeat(12) {
@@ -13642,6 +14016,34 @@ private fun SoundboardEditorScreen(
     LaunchedEffect(groups.size, pendingScrollToNewGroup) {
         if (pendingScrollToNewGroup <= 0 || groups.isEmpty()) return@LaunchedEffect
         scrollGroupTabsToEndWhenReady(pendingScrollToNewGroup)
+    }
+
+    LaunchedEffect(selectedGroup?.items, selectedGroupIndex) {
+        val validIds = selectedGroup?.items?.map { it.id }?.toSet().orEmpty()
+        selectedItemIds = selectedItemIds.filter { it in validIds }.toSet()
+        if (selectedItemIds.isEmpty()) {
+            batchSelectionMode = false
+        }
+    }
+
+    LaunchedEffect(batchSelectionMode, selectedItemIds, groups.size, selectedGroupIndex) {
+        if (batchSelectionMode) {
+            onBatchTopBarActionsChange(
+                EditorBatchTopBarActions(
+                    onMove = { showBatchMoveDialog = true },
+                    onDelete = { showBatchDeleteConfirm = true },
+                    onClose = { clearBatchSelection() },
+                    canMove = selectedItemIds.isNotEmpty() && groups.size > 1,
+                    canDelete = selectedItemIds.isNotEmpty()
+                )
+            )
+        } else {
+            onBatchTopBarActionsChange(null)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { onBatchTopBarActionsChange(null) }
     }
 
     CenteredPageBox(
@@ -13737,11 +14139,12 @@ private fun SoundboardEditorScreen(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Md2CardTitleText("分组", modifier = Modifier.weight(1f))
-                            Md2TextButton(onClick = {
-                                pendingScrollToNewGroup += 1
-                                viewModel.addSoundboardGroup()
-                                toast(context, "已新增分组")
+                        Md2CardTitleText("分组", modifier = Modifier.weight(1f))
+                        Md2TextButton(onClick = {
+                            clearBatchSelection()
+                            pendingScrollToNewGroup += 1
+                            viewModel.addSoundboardGroup()
+                            toast(context, "已新增分组")
                             }) {
                                 MsIcon("add", contentDescription = "新增分组")
                                 Spacer(Modifier.width(4.dp))
@@ -13774,6 +14177,7 @@ private fun SoundboardEditorScreen(
                                                 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                                             )
                                             .clickable {
+                                                clearBatchSelection()
                                                 selectedGroupIndex = idx
                                                 viewModel.selectSoundboardGroup(idx)
                                             }
@@ -13848,6 +14252,7 @@ private fun SoundboardEditorScreen(
                                     contentDescription = "分组左移",
                                     onClick = {
                                         if (selectedGroupIndex > 0) {
+                                            clearBatchSelection()
                                             viewModel.moveSoundboardGroup(selectedGroupIndex, selectedGroupIndex - 1)
                                             selectedGroupIndex -= 1
                                         }
@@ -13859,6 +14264,7 @@ private fun SoundboardEditorScreen(
                                     contentDescription = "分组右移",
                                     onClick = {
                                         if (selectedGroupIndex < groups.lastIndex) {
+                                            clearBatchSelection()
                                             viewModel.moveSoundboardGroup(selectedGroupIndex, selectedGroupIndex + 1)
                                             selectedGroupIndex += 1
                                         }
@@ -13871,6 +14277,7 @@ private fun SoundboardEditorScreen(
                                     onClick = {
                                         viewModel.removeSoundboardGroup(selectedGroupIndex)
                                         selectedGroupIndex = viewModel.currentSoundboardGroupIndex()
+                                        clearBatchSelection()
                                     },
                                     enabled = groups.size > 1
                                 )
@@ -13900,6 +14307,8 @@ private fun SoundboardEditorScreen(
                                 state = viewModel.uiState,
                                 groupIndex = targetIndex,
                                 items = targetGroup.items,
+                                selectionMode = batchSelectionMode,
+                                selectedItemIds = selectedItemIds,
                                 parentEdgeScrollBy = { delta ->
                                     val canScroll = if (delta < 0) listState.canScrollBackward else listState.canScrollForward
                                     if (canScroll) {
@@ -13916,13 +14325,90 @@ private fun SoundboardEditorScreen(
                                 onItemsChanged = { reordered -> viewModel.setSoundboardItems(targetIndex, reordered) },
                                 onItemChanged = { itemIndex, updated ->
                                     viewModel.updateSoundboardItem(targetIndex, itemIndex) { updated }
-                                }
+                                },
+                                onEnterSelectionMode = { itemId -> enterBatchSelection(itemId) },
+                                onToggleSelection = { itemId -> toggleBatchSelection(itemId) }
                             )
                         }
                     }
                 }
             }
         }
+    }
+
+    if (showBatchDeleteConfirm) {
+        val count = selectedItemIds.size
+        AlertDialog(
+            onDismissRequest = { showBatchDeleteConfirm = false },
+            title = { Text("删除音效条目") },
+            text = { Text("确定删除已选择的 $count 个音效条目吗？") },
+            confirmButton = {
+                Md2TextButton(onClick = {
+                    val removed = viewModel.removeSoundboardItemsByIds(selectedGroupIndex, selectedItemIds)
+                    showBatchDeleteConfirm = false
+                    clearBatchSelection()
+                    if (removed > 0) toast(context, "已删除 $removed 个音效")
+                }) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                Md2TextButton(onClick = { showBatchDeleteConfirm = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (showBatchMoveDialog) {
+        AlertDialog(
+            onDismissRequest = { showBatchMoveDialog = false },
+            title = { Text("移动到其它分组") },
+            text = {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    itemsIndexed(groups) { idx, group ->
+                        if (idx != selectedGroupIndex) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(UiTokens.Radius))
+                                    .clickable {
+                                        val moved = viewModel.moveSoundboardItemsToGroup(
+                                            selectedGroupIndex,
+                                            selectedItemIds,
+                                            idx
+                                        )
+                                        showBatchMoveDialog = false
+                                        clearBatchSelection()
+                                        if (moved > 0) toast(context, "已移动 $moved 个音效")
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                MsIcon(group.icon, contentDescription = group.title)
+                                Text(
+                                    text = group.title.ifBlank { "未命名分组" },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                Md2TextButton(onClick = { showBatchMoveDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
     }
 }
 
@@ -13932,10 +14418,14 @@ private fun SoundboardItemsRecyclerCard(
     state: UiState,
     groupIndex: Int,
     items: List<SoundboardItem>,
+    selectionMode: Boolean,
+    selectedItemIds: Set<Long>,
     parentEdgeScrollBy: ((Int) -> Boolean)? = null,
     onAdd: () -> Unit,
     onItemsChanged: (List<SoundboardItem>) -> Unit,
-    onItemChanged: (Int, SoundboardItem) -> Unit
+    onItemChanged: (Int, SoundboardItem) -> Unit,
+    onEnterSelectionMode: (Long) -> Unit,
+    onToggleSelection: (Long) -> Unit
 ) {
     val context = LocalContext.current
     var editTargetIndex by remember(items) { mutableStateOf<Int?>(null) }
@@ -13945,6 +14435,7 @@ private fun SoundboardItemsRecyclerCard(
     var clipSourceUri by remember { mutableStateOf<Uri?>(null) }
     var showBuiltinAudioPicker by remember { mutableStateOf(false) }
     var showBuiltinBatchAudioPicker by remember { mutableStateOf(false) }
+    var deleteTargetItem by remember(items) { mutableStateOf<SoundboardItem?>(null) }
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             clipSourceUri = uri
@@ -13998,6 +14489,8 @@ private fun SoundboardItemsRecyclerCard(
                     .heightIn(min = 92.dp)
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 items = items,
+                selectionMode = selectionMode,
+                selectedItemIds = selectedItemIds,
                 onItemsChanged = onItemsChanged,
                 onEditRequested = { index, item ->
                     editTargetIndex = index
@@ -14012,9 +14505,36 @@ private fun SoundboardItemsRecyclerCard(
                         audioPicker.launch("audio/*")
                     }
                 },
+                onDeleteRequested = { _, item ->
+                    deleteTargetItem = item
+                },
+                onEnterSelectionMode = onEnterSelectionMode,
+                onToggleSelection = onToggleSelection,
                 parentEdgeScrollBy = parentEdgeScrollBy
             )
         }
+    }
+
+    deleteTargetItem?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTargetItem = null },
+            title = { Text("删除音效条目") },
+            text = { Text("确定删除“${target.title.ifBlank { "未命名音效" }}”吗？") },
+            confirmButton = {
+                Md2TextButton(onClick = {
+                    viewModel.removeSoundboardItemsByIds(groupIndex, setOf(target.id))
+                    deleteTargetItem = null
+                    toast(context, "已删除音效")
+                }) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                Md2TextButton(onClick = { deleteTargetItem = null }) {
+                    Text("取消")
+                }
+            }
+        )
     }
 
     if (showBuiltinAudioPicker) {
@@ -14264,15 +14784,23 @@ private fun formatDurationMs(ms: Long): String {
 private fun SoundboardItemsRecyclerList(
     modifier: Modifier = Modifier,
     items: List<SoundboardItem>,
+    selectionMode: Boolean,
+    selectedItemIds: Set<Long>,
     onItemsChanged: (List<SoundboardItem>) -> Unit,
     onEditRequested: (Int, SoundboardItem) -> Unit,
     onAudioRequested: (Int) -> Unit,
+    onDeleteRequested: (Int, SoundboardItem) -> Unit,
+    onEnterSelectionMode: (Long) -> Unit,
+    onToggleSelection: (Long) -> Unit,
     parentEdgeScrollBy: ((Int) -> Boolean)? = null
 ) {
     val parentComposition = rememberCompositionContext()
     val onItemsChangedState = rememberUpdatedState(onItemsChanged)
     val onEditRequestedState = rememberUpdatedState(onEditRequested)
     val onAudioRequestedState = rememberUpdatedState(onAudioRequested)
+    val onDeleteRequestedState = rememberUpdatedState(onDeleteRequested)
+    val onEnterSelectionModeState = rememberUpdatedState(onEnterSelectionMode)
+    val onToggleSelectionState = rememberUpdatedState(onToggleSelection)
 
     AndroidView(
         modifier = modifier,
@@ -14295,7 +14823,10 @@ private fun SoundboardItemsRecyclerList(
                 parentComposition = parentComposition,
                 onItemsChanged = { changed -> onItemsChangedState.value(changed) },
                 onEditRequested = { index, item -> onEditRequestedState.value(index, item) },
-                onAudioRequested = { index -> onAudioRequestedState.value(index) }
+                onAudioRequested = { index -> onAudioRequestedState.value(index) },
+                onDeleteRequested = { index, item -> onDeleteRequestedState.value(index, item) },
+                onEnterSelectionMode = { itemId -> onEnterSelectionModeState.value(itemId) },
+                onToggleSelection = { itemId -> onToggleSelectionState.value(itemId) }
             )
             recycler.adapter = adapter
             val touchCallback = object : ItemTouchHelper.Callback() {
@@ -14307,7 +14838,10 @@ private fun SoundboardItemsRecyclerList(
                 override fun getMovementFlags(
                     recyclerView: RecyclerView,
                     viewHolder: RecyclerView.ViewHolder
-                ): Int = makeMovementFlags(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0)
+                ): Int {
+                    if (adapter.selectionMode) return makeMovementFlags(0, 0)
+                    return makeMovementFlags(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0)
+                }
 
                 override fun onMove(
                     recyclerView: RecyclerView,
@@ -14367,6 +14901,7 @@ private fun SoundboardItemsRecyclerList(
         },
         update = { recycler ->
             val adapter = recycler.adapter as? SoundboardItemRecyclerAdapter ?: return@AndroidView
+            adapter.updateSelection(selectionMode, selectedItemIds)
             adapter.submitFromState(items)
         }
     )
@@ -14381,10 +14916,16 @@ private class SoundboardItemRecyclerAdapter(
     private val parentComposition: CompositionContext,
     private val onItemsChanged: (List<SoundboardItem>) -> Unit,
     private val onEditRequested: (Int, SoundboardItem) -> Unit,
-    private val onAudioRequested: (Int) -> Unit
+    private val onAudioRequested: (Int) -> Unit,
+    private val onDeleteRequested: (Int, SoundboardItem) -> Unit,
+    private val onEnterSelectionMode: (Long) -> Unit,
+    private val onToggleSelection: (Long) -> Unit
 ) : RecyclerView.Adapter<SoundboardItemRecyclerAdapter.ItemViewHolder>() {
     private val items = mutableListOf<SoundboardEditableItem>()
     var isDragging: Boolean = false
+    var selectionMode: Boolean = false
+        private set
+    private var selectedItemIds: Set<Long> = emptySet()
     var onStartDrag: ((RecyclerView.ViewHolder) -> Unit)? = null
     private var draggingItemId: Long? = null
 
@@ -14412,13 +14953,13 @@ private class SoundboardItemRecyclerAdapter(
         holder.bind(
             item = row,
             isDragged = draggingItemId == row.id,
+            selectionMode = selectionMode,
+            selected = row.id in selectedItemIds,
             canDelete = true,
             onDelete = {
                 val idx = holder.bindingAdapterPosition
                 if (idx in items.indices) {
-                    items.removeAt(idx)
-                    notifyItemRemoved(idx)
-                    onItemsChanged(snapshotItems())
+                    onDeleteRequested(idx, items[idx].item)
                 }
             },
             onEdit = {
@@ -14429,12 +14970,27 @@ private class SoundboardItemRecyclerAdapter(
                 val idx = holder.bindingAdapterPosition
                 if (idx in items.indices) onAudioRequested(idx)
             },
+            onEnterSelectionMode = {
+                val idx = holder.bindingAdapterPosition
+                if (idx in items.indices) onEnterSelectionMode(items[idx].item.id)
+            },
+            onToggleSelection = {
+                val idx = holder.bindingAdapterPosition
+                if (idx in items.indices) onToggleSelection(items[idx].item.id)
+            },
             onStartDrag = {
-                if (holder.bindingAdapterPosition != RecyclerView.NO_POSITION) {
+                if (!selectionMode && holder.bindingAdapterPosition != RecyclerView.NO_POSITION) {
                     onStartDrag?.invoke(holder)
                 }
             }
         )
+    }
+
+    fun updateSelection(selectionMode: Boolean, selectedItemIds: Set<Long>) {
+        val changed = this.selectionMode != selectionMode || this.selectedItemIds != selectedItemIds
+        this.selectionMode = selectionMode
+        this.selectedItemIds = selectedItemIds
+        if (changed) notifyDataSetChanged()
     }
 
     fun submitFromState(newItems: List<SoundboardItem>) {
@@ -14470,10 +15026,14 @@ private class SoundboardItemRecyclerAdapter(
         fun bind(
             item: SoundboardItem,
             isDragged: Boolean,
+            selectionMode: Boolean,
+            selected: Boolean,
             canDelete: Boolean,
             onDelete: () -> Unit,
             onEdit: () -> Unit,
             onAudio: () -> Unit,
+            onEnterSelectionMode: () -> Unit,
+            onToggleSelection: () -> Unit,
             onStartDrag: () -> Unit
         ) {
             composeView.setContent {
@@ -14481,10 +15041,14 @@ private class SoundboardItemRecyclerAdapter(
                     SoundboardEditableRow(
                         item = item,
                         isDragged = isDragged,
+                        selectionMode = selectionMode,
+                        selected = selected,
                         canDelete = canDelete,
                         onDelete = onDelete,
                         onEdit = onEdit,
                         onAudio = onAudio,
+                        onEnterSelectionMode = onEnterSelectionMode,
+                        onToggleSelection = onToggleSelection,
                         onStartDrag = onStartDrag
                     )
                 }
@@ -14494,14 +15058,18 @@ private class SoundboardItemRecyclerAdapter(
 }
 
 @Composable
-@OptIn(ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class)
 private fun SoundboardEditableRow(
     item: SoundboardItem,
     isDragged: Boolean,
+    selectionMode: Boolean,
+    selected: Boolean,
     canDelete: Boolean,
     onDelete: () -> Unit,
     onEdit: () -> Unit,
     onAudio: () -> Unit,
+    onEnterSelectionMode: () -> Unit,
+    onToggleSelection: () -> Unit,
     onStartDrag: () -> Unit
 ) {
     val rowElevation by animateDpAsState(
@@ -14515,9 +15083,20 @@ private fun SoundboardEditableRow(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 2.dp, vertical = 4.dp),
+            .padding(horizontal = 2.dp, vertical = 4.dp)
+            .heightIn(min = 72.dp)
+            .combinedClickable(
+                onClick = {
+                    if (selectionMode) onToggleSelection()
+                },
+                onLongClick = onEnterSelectionMode
+            ),
         shape = RoundedCornerShape(UiTokens.Radius),
-        backgroundColor = md2CardContainerColor(),
+        backgroundColor = if (selected) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+        } else {
+            md2CardContainerColor()
+        },
         elevation = rowElevation
     ) {
         Row(
@@ -14527,6 +15106,12 @@ private fun SoundboardEditableRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            AnimatedVisibility(visible = selectionMode) {
+                Checkbox(
+                    checked = selected,
+                    onCheckedChange = { onToggleSelection() }
+                )
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = item.title.ifBlank { "未命名音效" },
@@ -14545,39 +15130,50 @@ private fun SoundboardEditableRow(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Md2IconButton(
-                icon = "folder_open",
-                contentDescription = "选择音频",
-                onClick = onAudio
-            )
-            Md2IconButton(
-                icon = "edit",
-                contentDescription = "编辑条目",
-                onClick = onEdit
-            )
-            Md2IconButton(
-                icon = "drag_indicator",
-                contentDescription = "拖动排序",
-                onClick = {},
-                modifier = Modifier.pointerInteropFilter { ev ->
-                    when (ev.actionMasked) {
-                        MotionEvent.ACTION_DOWN -> {
-                            onStartDrag()
-                            true
+            AnimatedVisibility(
+                visible = !selectionMode,
+                enter = fadeIn(animationSpec = tween(120)) + expandHorizontally(animationSpec = tween(120)),
+                exit = fadeOut(animationSpec = tween(100)) + shrinkHorizontally(animationSpec = tween(100))
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Md2IconButton(
+                        icon = "folder_open",
+                        contentDescription = "选择音频",
+                        onClick = onAudio
+                    )
+                    Md2IconButton(
+                        icon = "edit",
+                        contentDescription = "编辑条目",
+                        onClick = onEdit
+                    )
+                    Md2IconButton(
+                        icon = "drag_indicator",
+                        contentDescription = "拖动排序",
+                        onClick = {},
+                        modifier = Modifier.pointerInteropFilter { ev ->
+                            when (ev.actionMasked) {
+                                MotionEvent.ACTION_DOWN -> {
+                                    onStartDrag()
+                                    true
+                                }
+                                MotionEvent.ACTION_MOVE,
+                                MotionEvent.ACTION_UP,
+                                MotionEvent.ACTION_CANCEL -> true
+                                else -> false
+                            }
                         }
-                        MotionEvent.ACTION_MOVE,
-                        MotionEvent.ACTION_UP,
-                        MotionEvent.ACTION_CANCEL -> true
-                        else -> false
-                    }
+                    )
+                    Md2IconButton(
+                        icon = "delete",
+                        contentDescription = "删除音效",
+                        onClick = onDelete,
+                        enabled = canDelete
+                    )
                 }
-            )
-            Md2IconButton(
-                icon = "delete",
-                contentDescription = "删除音效",
-                onClick = onDelete,
-                enabled = canDelete
-            )
+            }
         }
     }
 }
@@ -15043,10 +15639,11 @@ fun QuickSubtitleScreen(
         minFontSizeSp: Float,
         lineHeightMultiplier: Float,
         modifier: Modifier,
-        cursorIndex: Int?
-    ) -> Unit = { text, color, maxFontSizeSp, minFontSizeSp, lineHeightMultiplier, modifier, cursorIndex ->
+        cursorIndex: Int?,
+        rotateEnabled: Boolean
+    ) -> Unit = { text, color, maxFontSizeSp, minFontSizeSp, lineHeightMultiplier, modifier, cursorIndex, rotateEnabled ->
         Crossfade(
-            targetState = subtitleRotated180,
+            targetState = subtitleRotated180 && rotateEnabled,
             animationSpec = tween(160),
             label = "quick_subtitle_rotation_fade"
         ) { rotated ->
@@ -15366,7 +15963,8 @@ fun QuickSubtitleScreen(
                 14f,
                 1.15f,
                 modifier,
-                if (preview) cursorIndex else null
+                if (preview) cursorIndex else null,
+                !preview || !keyboardVisible
             )
         }
     }
@@ -16640,7 +17238,8 @@ fun QuickSubtitleScreen(
                             Modifier
                                 .fillMaxSize()
                                 .padding(16.dp),
-                            null
+                            null,
+                            true
                         )
                     }
                 }
@@ -16742,13 +17341,18 @@ private fun QuickSubtitleAdaptiveText(
         }
         val contentModifier = if (fitResult.needsScroll) {
             Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
+                .heightIn(min = maxHeight)
                 .verticalScroll(scrollState)
         } else {
             Modifier.fillMaxSize()
         }
+        val rotateWholeViewport = textRotationZ != 0f && !fitResult.needsScroll
+        val rotateTextOnly = textRotationZ != 0f && fitResult.needsScroll
         Box(
-            modifier = contentModifier,
+            modifier = contentModifier.then(
+                if (rotateWholeViewport) Modifier.graphicsLayer(rotationZ = textRotationZ) else Modifier
+            ),
             contentAlignment = contentAlignment
         ) {
             Text(
@@ -16777,7 +17381,7 @@ private fun QuickSubtitleAdaptiveText(
                             strokeWidth = cursorStrokeWidthPx
                         )
                     }
-                    .then(if (textRotationZ != 0f) Modifier.graphicsLayer(rotationZ = textRotationZ) else Modifier)
+                    .then(if (rotateTextOnly) Modifier.graphicsLayer(rotationZ = textRotationZ) else Modifier)
             )
         }
     }
@@ -17088,6 +17692,7 @@ private fun Md2CardTitleText(
 @OptIn(ExperimentalFoundationApi::class)
 private fun QuickSubtitleEditorScreen(
     viewModel: MainViewModel,
+    onBatchTopBarActionsChange: (EditorBatchTopBarActions?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -17107,6 +17712,31 @@ private fun QuickSubtitleEditorScreen(
     val groupTabsScrollScope = rememberCoroutineScope()
     val pageEdgeScrollScope = rememberCoroutineScope()
     var pendingScrollToNewGroup by remember { mutableIntStateOf(0) }
+    var batchSelectionMode by remember { mutableStateOf(false) }
+    var selectedItemIndexes by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var showBatchDeleteConfirm by remember { mutableStateOf(false) }
+    var showBatchMoveDialog by remember { mutableStateOf(false) }
+
+    fun clearBatchSelection() {
+        batchSelectionMode = false
+        selectedItemIndexes = emptySet()
+    }
+
+    fun enterBatchSelection(index: Int) {
+        batchSelectionMode = true
+        selectedItemIndexes = selectedItemIndexes + index
+    }
+
+    fun toggleBatchSelection(index: Int) {
+        selectedItemIndexes = if (index in selectedItemIndexes) {
+            selectedItemIndexes - index
+        } else {
+            selectedItemIndexes + index
+        }
+        if (selectedItemIndexes.isEmpty()) {
+            batchSelectionMode = false
+        }
+    }
 
     suspend fun scrollGroupTabsToEndWhenReady(request: Int) {
         repeat(12) {
@@ -17125,6 +17755,34 @@ private fun QuickSubtitleEditorScreen(
     LaunchedEffect(groups.size, pendingScrollToNewGroup) {
         if (pendingScrollToNewGroup <= 0 || groups.isEmpty()) return@LaunchedEffect
         scrollGroupTabsToEndWhenReady(pendingScrollToNewGroup)
+    }
+
+    LaunchedEffect(selectedGroup?.items?.size, selectedGroupIndex) {
+        val itemCount = selectedGroup?.items?.size ?: 0
+        selectedItemIndexes = selectedItemIndexes.filter { it in 0 until itemCount }.toSet()
+        if (selectedItemIndexes.isEmpty()) {
+            batchSelectionMode = false
+        }
+    }
+
+    LaunchedEffect(batchSelectionMode, selectedItemIndexes, groups.size, selectedGroupIndex) {
+        if (batchSelectionMode) {
+            onBatchTopBarActionsChange(
+                EditorBatchTopBarActions(
+                    onMove = { showBatchMoveDialog = true },
+                    onDelete = { showBatchDeleteConfirm = true },
+                    onClose = { clearBatchSelection() },
+                    canMove = selectedItemIndexes.isNotEmpty() && groups.size > 1,
+                    canDelete = selectedItemIndexes.isNotEmpty()
+                )
+            )
+        } else {
+            onBatchTopBarActionsChange(null)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { onBatchTopBarActionsChange(null) }
     }
 
     CenteredPageBox(
@@ -17185,6 +17843,7 @@ private fun QuickSubtitleEditorScreen(
                     ) {
                         Md2CardTitleText("分组", modifier = Modifier.weight(1f))
                         Md2TextButton(onClick = {
+                            clearBatchSelection()
                             pendingScrollToNewGroup += 1
                             viewModel.addQuickSubtitleGroup()
                             toast(context, "已新增分组")
@@ -17220,6 +17879,7 @@ private fun QuickSubtitleEditorScreen(
                                             else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                                         )
                                         .clickable {
+                                            clearBatchSelection()
                                             selectedGroupIndex = idx
                                             viewModel.selectQuickSubtitleGroup(idx)
                                         }
@@ -17294,6 +17954,7 @@ private fun QuickSubtitleEditorScreen(
                                 contentDescription = "分组左移",
                                 onClick = {
                                     if (selectedGroupIndex > 0) {
+                                        clearBatchSelection()
                                         viewModel.moveQuickSubtitleGroup(selectedGroupIndex, selectedGroupIndex - 1)
                                         selectedGroupIndex -= 1
                                     }
@@ -17305,6 +17966,7 @@ private fun QuickSubtitleEditorScreen(
                                 contentDescription = "分组右移",
                                 onClick = {
                                     if (selectedGroupIndex < groups.lastIndex) {
+                                        clearBatchSelection()
                                         viewModel.moveQuickSubtitleGroup(selectedGroupIndex, selectedGroupIndex + 1)
                                         selectedGroupIndex += 1
                                     }
@@ -17317,6 +17979,7 @@ private fun QuickSubtitleEditorScreen(
                                 onClick = {
                                     viewModel.removeQuickSubtitleGroup(selectedGroupIndex)
                                     selectedGroupIndex = viewModel.currentQuickSubtitleGroupIndex()
+                                    clearBatchSelection()
                                 },
                                 enabled = groups.size > 1
                             )
@@ -17330,6 +17993,8 @@ private fun QuickSubtitleEditorScreen(
             item(key = "items_card") {
                 QuickSubtitleItemsRecyclerCard(
                     items = selectedGroup.items,
+                    selectionMode = batchSelectionMode,
+                    selectedIndexes = selectedItemIndexes,
                     parentEdgeScrollBy = { delta ->
                         val canScroll = if (delta < 0) listState.canScrollBackward else listState.canScrollForward
                         if (canScroll) {
@@ -17348,21 +18013,102 @@ private fun QuickSubtitleEditorScreen(
                     },
                     onItemTextChanged = { itemIndex, value ->
                         viewModel.updateQuickSubtitleItem(selectedGroupIndex, itemIndex, value)
-                    }
+                    },
+                    onEnterSelectionMode = { index -> enterBatchSelection(index) },
+                    onToggleSelection = { index -> toggleBatchSelection(index) }
                 )
             }
             }
         }
+    }
+
+    if (showBatchDeleteConfirm) {
+        val count = selectedItemIndexes.size
+        AlertDialog(
+            onDismissRequest = { showBatchDeleteConfirm = false },
+            title = { Text("删除快捷文本") },
+            text = { Text("确定删除已选择的 $count 条快捷文本吗？") },
+            confirmButton = {
+                Md2TextButton(onClick = {
+                    val removed = viewModel.removeQuickSubtitleItems(selectedGroupIndex, selectedItemIndexes)
+                    showBatchDeleteConfirm = false
+                    clearBatchSelection()
+                    if (removed > 0) toast(context, "已删除 $removed 条快捷文本")
+                }) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                Md2TextButton(onClick = { showBatchDeleteConfirm = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (showBatchMoveDialog) {
+        AlertDialog(
+            onDismissRequest = { showBatchMoveDialog = false },
+            title = { Text("移动到其它分组") },
+            text = {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    itemsIndexed(groups) { idx, group ->
+                        if (idx != selectedGroupIndex) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(UiTokens.Radius))
+                                    .clickable {
+                                        val moved = viewModel.moveQuickSubtitleItemsToGroup(
+                                            selectedGroupIndex,
+                                            selectedItemIndexes,
+                                            idx
+                                        )
+                                        showBatchMoveDialog = false
+                                        clearBatchSelection()
+                                        if (moved > 0) toast(context, "已移动 $moved 条快捷文本")
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                MsIcon(group.icon, contentDescription = group.title)
+                                Text(
+                                    text = group.title.ifBlank { "未命名分组" },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                Md2TextButton(onClick = { showBatchMoveDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
     }
 }
 
 @Composable
 private fun QuickSubtitleItemsRecyclerCard(
     items: List<String>,
+    selectionMode: Boolean,
+    selectedIndexes: Set<Int>,
     parentEdgeScrollBy: ((Int) -> Boolean)? = null,
     onAdd: () -> Unit,
     onItemsChanged: (List<String>) -> Unit,
-    onItemTextChanged: (Int, String) -> Unit
+    onItemTextChanged: (Int, String) -> Unit,
+    onEnterSelectionMode: (Int) -> Unit,
+    onToggleSelection: (Int) -> Unit
 ) {
     var editTargetIndex by remember(items) { mutableStateOf<Int?>(null) }
     var editText by remember { mutableStateOf("") }
@@ -17393,11 +18139,15 @@ private fun QuickSubtitleItemsRecyclerCard(
                     .heightIn(min = 92.dp)
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 items = items,
+                selectionMode = selectionMode,
+                selectedIndexes = selectedIndexes,
                 onItemsChanged = onItemsChanged,
                 onEditRequested = { index, value ->
                     editTargetIndex = index
                     editText = value
                 },
+                onEnterSelectionMode = onEnterSelectionMode,
+                onToggleSelection = onToggleSelection,
                 parentEdgeScrollBy = parentEdgeScrollBy
             )
         }
@@ -17448,13 +18198,19 @@ private fun QuickSubtitleItemsRecyclerCard(
 private fun QuickSubtitleItemsRecyclerList(
     modifier: Modifier = Modifier,
     items: List<String>,
+    selectionMode: Boolean,
+    selectedIndexes: Set<Int>,
     onItemsChanged: (List<String>) -> Unit,
     onEditRequested: (Int, String) -> Unit,
+    onEnterSelectionMode: (Int) -> Unit,
+    onToggleSelection: (Int) -> Unit,
     parentEdgeScrollBy: ((Int) -> Boolean)? = null
 ) {
     val parentComposition = rememberCompositionContext()
     val onItemsChangedState = rememberUpdatedState(onItemsChanged)
     val onEditRequestedState = rememberUpdatedState(onEditRequested)
+    val onEnterSelectionModeState = rememberUpdatedState(onEnterSelectionMode)
+    val onToggleSelectionState = rememberUpdatedState(onToggleSelection)
 
     AndroidView(
         modifier = modifier,
@@ -17477,7 +18233,9 @@ private fun QuickSubtitleItemsRecyclerList(
             val adapter = QuickSubtitleItemRecyclerAdapter(
                 parentComposition = parentComposition,
                 onItemsChanged = { changed -> onItemsChangedState.value(changed) },
-                onEditRequested = { index, value -> onEditRequestedState.value(index, value) }
+                onEditRequested = { index, value -> onEditRequestedState.value(index, value) },
+                onEnterSelectionMode = { index -> onEnterSelectionModeState.value(index) },
+                onToggleSelection = { index -> onToggleSelectionState.value(index) }
             )
             recycler.adapter = adapter
 
@@ -17493,6 +18251,7 @@ private fun QuickSubtitleItemsRecyclerList(
                     recyclerView: RecyclerView,
                     viewHolder: RecyclerView.ViewHolder
                 ): Int {
+                    if (adapter.selectionMode) return makeMovementFlags(0, 0)
                     val dragFlags = ItemTouchHelper.UP or ItemTouchHelper.DOWN
                     return makeMovementFlags(dragFlags, 0)
                 }
@@ -17561,6 +18320,7 @@ private fun QuickSubtitleItemsRecyclerList(
         },
         update = { recycler ->
             val adapter = recycler.adapter as? QuickSubtitleItemRecyclerAdapter ?: return@AndroidView
+            adapter.updateSelection(selectionMode, selectedIndexes)
             adapter.submitFromState(items)
         }
     )
@@ -17574,12 +18334,17 @@ private data class QuickSubtitleEditableItem(
 private class QuickSubtitleItemRecyclerAdapter(
     private val parentComposition: CompositionContext,
     private val onItemsChanged: (List<String>) -> Unit,
-    private val onEditRequested: (Int, String) -> Unit
+    private val onEditRequested: (Int, String) -> Unit,
+    private val onEnterSelectionMode: (Int) -> Unit,
+    private val onToggleSelection: (Int) -> Unit
 ) : RecyclerView.Adapter<QuickSubtitleItemRecyclerAdapter.ItemViewHolder>() {
 
     private val items = mutableListOf<QuickSubtitleEditableItem>()
     private var nextId = 1L
     var isDragging: Boolean = false
+    var selectionMode: Boolean = false
+        private set
+    private var selectedIndexes: Set<Int> = emptySet()
     var onStartDrag: ((RecyclerView.ViewHolder) -> Unit)? = null
     private var draggingItemId: Long? = null
 
@@ -17611,6 +18376,8 @@ private class QuickSubtitleItemRecyclerAdapter(
         holder.bind(
             text = row.text,
             isDragged = draggingItemId == row.id,
+            selectionMode = selectionMode,
+            selected = position in selectedIndexes,
             canDelete = items.size > 1,
             onDelete = {
                 val idx = holder.bindingAdapterPosition
@@ -17626,12 +18393,27 @@ private class QuickSubtitleItemRecyclerAdapter(
                     onEditRequested(idx, items[idx].text)
                 }
             },
+            onEnterSelectionMode = {
+                val idx = holder.bindingAdapterPosition
+                if (idx in items.indices) onEnterSelectionMode(idx)
+            },
+            onToggleSelection = {
+                val idx = holder.bindingAdapterPosition
+                if (idx in items.indices) onToggleSelection(idx)
+            },
             onStartDrag = {
-                if (holder.bindingAdapterPosition != RecyclerView.NO_POSITION) {
+                if (!selectionMode && holder.bindingAdapterPosition != RecyclerView.NO_POSITION) {
                     onStartDrag?.invoke(holder)
                 }
             }
         )
+    }
+
+    fun updateSelection(selectionMode: Boolean, selectedIndexes: Set<Int>) {
+        val changed = this.selectionMode != selectionMode || this.selectedIndexes != selectedIndexes
+        this.selectionMode = selectionMode
+        this.selectedIndexes = selectedIndexes
+        if (changed) notifyDataSetChanged()
     }
 
     fun submitFromState(newItems: List<String>) {
@@ -17715,9 +18497,13 @@ private class QuickSubtitleItemRecyclerAdapter(
         fun bind(
             text: String,
             isDragged: Boolean,
+            selectionMode: Boolean,
+            selected: Boolean,
             canDelete: Boolean,
             onDelete: () -> Unit,
             onEdit: () -> Unit,
+            onEnterSelectionMode: () -> Unit,
+            onToggleSelection: () -> Unit,
             onStartDrag: () -> Unit
         ) {
             composeView.setContent {
@@ -17725,9 +18511,13 @@ private class QuickSubtitleItemRecyclerAdapter(
                     QuickSubtitleEditableRow(
                         value = text,
                         isDragged = isDragged,
+                        selectionMode = selectionMode,
+                        selected = selected,
                         canDelete = canDelete,
                         onDelete = onDelete,
                         onEdit = onEdit,
+                        onEnterSelectionMode = onEnterSelectionMode,
+                        onToggleSelection = onToggleSelection,
                         onStartDrag = onStartDrag
                     )
                 }
@@ -17737,13 +18527,17 @@ private class QuickSubtitleItemRecyclerAdapter(
 }
 
 @Composable
-@OptIn(ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class)
 private fun QuickSubtitleEditableRow(
     value: String,
     isDragged: Boolean,
+    selectionMode: Boolean,
+    selected: Boolean,
     canDelete: Boolean,
     onDelete: () -> Unit,
     onEdit: () -> Unit,
+    onEnterSelectionMode: () -> Unit,
+    onToggleSelection: () -> Unit,
     onStartDrag: () -> Unit
 ) {
     val rowElevation by animateDpAsState(
@@ -17758,9 +18552,20 @@ private fun QuickSubtitleEditableRow(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 2.dp, vertical = 4.dp),
+            .padding(horizontal = 2.dp, vertical = 4.dp)
+            .heightIn(min = 72.dp)
+            .combinedClickable(
+                onClick = {
+                    if (selectionMode) onToggleSelection()
+                },
+                onLongClick = onEnterSelectionMode
+            ),
         shape = RoundedCornerShape(UiTokens.Radius),
-        backgroundColor = md2CardContainerColor(),
+        backgroundColor = if (selected) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+        } else {
+            md2CardContainerColor()
+        },
         elevation = rowElevation
     ) {
         Row(
@@ -17770,6 +18575,12 @@ private fun QuickSubtitleEditableRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            AnimatedVisibility(visible = selectionMode) {
+                Checkbox(
+                    checked = selected,
+                    onCheckedChange = { onToggleSelection() }
+                )
+            }
             Text(
                 text = value.ifBlank { "（空文本）" },
                 modifier = Modifier
@@ -17778,34 +18589,45 @@ private fun QuickSubtitleEditableRow(
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyMedium
             )
-            Md2IconButton(
-                icon = "edit",
-                contentDescription = "编辑文本",
-                onClick = onEdit
-            )
-            Md2IconButton(
-                icon = "drag_indicator",
-                contentDescription = "拖动排序",
-                onClick = {},
-                modifier = Modifier.pointerInteropFilter { ev ->
-                    when (ev.actionMasked) {
-                        MotionEvent.ACTION_DOWN -> {
-                            onStartDrag()
-                            true
+            AnimatedVisibility(
+                visible = !selectionMode,
+                enter = fadeIn(animationSpec = tween(120)) + expandHorizontally(animationSpec = tween(120)),
+                exit = fadeOut(animationSpec = tween(100)) + shrinkHorizontally(animationSpec = tween(100))
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Md2IconButton(
+                        icon = "edit",
+                        contentDescription = "编辑文本",
+                        onClick = onEdit
+                    )
+                    Md2IconButton(
+                        icon = "drag_indicator",
+                        contentDescription = "拖动排序",
+                        onClick = {},
+                        modifier = Modifier.pointerInteropFilter { ev ->
+                            when (ev.actionMasked) {
+                                MotionEvent.ACTION_DOWN -> {
+                                    onStartDrag()
+                                    true
+                                }
+                                MotionEvent.ACTION_MOVE,
+                                MotionEvent.ACTION_UP,
+                                MotionEvent.ACTION_CANCEL -> true
+                                else -> false
+                            }
                         }
-                        MotionEvent.ACTION_MOVE,
-                        MotionEvent.ACTION_UP,
-                        MotionEvent.ACTION_CANCEL -> true
-                        else -> false
-                    }
+                    )
+                    Md2IconButton(
+                        icon = "delete",
+                        contentDescription = "删除文本",
+                        onClick = onDelete,
+                        enabled = canDelete
+                    )
                 }
-            )
-            Md2IconButton(
-                icon = "delete",
-                contentDescription = "删除文本",
-                onClick = onDelete,
-                enabled = canDelete
-            )
+            }
         }
     }
 }

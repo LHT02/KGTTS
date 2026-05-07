@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.MediaDescription
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
@@ -14,6 +15,7 @@ import android.os.SystemClock
 
 object BluetoothMediaTitleBridge {
     private const val SESSION_TAG = "KIGTTS.BluetoothMediaTitle"
+    private const val DEFAULT_TITLE = "KIGTTS"
     private const val ARTIST = "KIGTTS"
     private const val ALBUM = "便捷字幕"
     private const val MAX_TITLE_LENGTH = 64
@@ -28,19 +30,20 @@ object BluetoothMediaTitleBridge {
     private var lastUpdateAtMs = 0L
     private var dwellUntilMs = 0L
     private var dwellGeneration = 0L
+    private var metadataRevision = 0L
     private var dwellFocusRelease: (() -> Unit)? = null
 
-    fun setEnabled(context: Context, value: Boolean) {
+    fun setEnabled(context: Context, value: Boolean, initialTitle: String = "") {
+        val title = normalizeTitle(initialTitle).ifBlank { DEFAULT_TITLE }
         val appContext = context.applicationContext
         mainHandler.post {
             synchronized(lock) {
                 enabled = value
                 if (value) {
-                    ensureSessionLocked(appContext)
-                    if (lastTitle.isNotBlank()) {
-                        publishTitleLocked(appContext, lastTitle, force = true)
-                    }
+                    AppLogger.i("Bluetooth subtitle enabled initialTitle=${title.logPreview()}")
+                    publishTitleLocked(appContext, lastTitle.ifBlank { title }, force = true)
                 } else {
+                    AppLogger.i("Bluetooth subtitle disabled")
                     lastTitle = ""
                     lastUpdateAtMs = 0L
                     dwellUntilMs = 0L
@@ -61,10 +64,12 @@ object BluetoothMediaTitleBridge {
         mainHandler.post {
             synchronized(lock) {
                 if (!enabled) return@synchronized
-                dwellUntilMs = 0L
-                dwellGeneration++
-                releaseDwellFocusLocked()
+                val now = SystemClock.elapsedRealtime()
+                dwellUntilMs = maxOf(dwellUntilMs, now + PLAYBACK_END_DWELL_MS)
+                val generation = ++dwellGeneration
+                acquireDwellFocusLocked(appContext)
                 publishTitleLocked(appContext, title, force = true)
+                postDwellRefreshLocked(appContext, generation)
             }
         }
     }
@@ -77,8 +82,8 @@ object BluetoothMediaTitleBridge {
                 val now = SystemClock.elapsedRealtime()
                 dwellUntilMs = maxOf(dwellUntilMs, now + PLAYBACK_END_DWELL_MS)
                 val generation = ++dwellGeneration
-                publishTitleLocked(appContext, lastTitle, force = true)
                 acquireDwellFocusLocked(appContext)
+                publishTitleLocked(appContext, lastTitle, force = true)
                 postDwellRefreshLocked(appContext, generation)
             }
         }
@@ -87,8 +92,19 @@ object BluetoothMediaTitleBridge {
     private fun ensureSessionLocked(context: Context): MediaSession {
         session?.let { return it }
         val created = MediaSession(context.applicationContext, SESSION_TAG).apply {
-            setPlaybackState(createPlayingState())
-            isActive = true
+            @Suppress("DEPRECATION")
+            setFlags(
+                MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or
+                    MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS
+            )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                setPlaybackToLocal(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+            }
         }
         session = created
         return created
@@ -97,19 +113,35 @@ object BluetoothMediaTitleBridge {
     private fun publishTitleLocked(context: Context, title: String, force: Boolean) {
         if (!force && title == lastTitle) return
         val activeSession = ensureSessionLocked(context)
+        val revision = ++metadataRevision
+        val mediaId = "kigtts_subtitle_$revision"
+        val queueId = revision
+        val description = MediaDescription.Builder()
+            .setMediaId(mediaId)
+            .setTitle(title)
+            .setSubtitle(ALBUM)
+            .setDescription(ARTIST)
+            .build()
         activeSession.setMetadata(
             MediaMetadata.Builder()
+                .putString(MediaMetadata.METADATA_KEY_MEDIA_ID, mediaId)
                 .putString(MediaMetadata.METADATA_KEY_TITLE, title)
                 .putString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE, title)
+                .putString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE, ALBUM)
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, ARTIST)
                 .putString(MediaMetadata.METADATA_KEY_ALBUM, ALBUM)
+                .putString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST, ARTIST)
+                .putString(MediaMetadata.METADATA_KEY_DISPLAY_DESCRIPTION, ARTIST)
+                .putLong(MediaMetadata.METADATA_KEY_DURATION, PLAYBACK_END_DWELL_MS)
                 .build()
         )
-        activeSession.setPlaybackState(createPlayingState())
+        activeSession.setQueue(listOf(MediaSession.QueueItem(description, queueId)))
+        activeSession.setPlaybackState(createPlayingState(queueId))
         activeSession.setQueueTitle(title)
         activeSession.isActive = true
         lastTitle = title
         lastUpdateAtMs = SystemClock.elapsedRealtime()
+        AppLogger.i("Bluetooth subtitle publish revision=$revision title=${title.logPreview()}")
     }
 
     private fun postDwellRefreshLocked(context: Context, generation: Long) {
@@ -148,6 +180,7 @@ object BluetoothMediaTitleBridge {
             val granted = manager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             if (granted) {
                 dwellFocusRelease = { runCatching { manager.abandonAudioFocusRequest(request) } }
+                AppLogger.i("Bluetooth subtitle dwell audio focus granted")
             } else {
                 AppLogger.i("Bluetooth subtitle dwell audio focus denied")
             }
@@ -163,6 +196,7 @@ object BluetoothMediaTitleBridge {
                     @Suppress("DEPRECATION")
                     runCatching { manager.abandonAudioFocus(listener) }
                 }
+                AppLogger.i("Bluetooth subtitle dwell audio focus granted")
             } else {
                 AppLogger.i("Bluetooth subtitle dwell audio focus denied")
             }
@@ -173,17 +207,24 @@ object BluetoothMediaTitleBridge {
         val release = dwellFocusRelease ?: return
         dwellFocusRelease = null
         release()
+        AppLogger.i("Bluetooth subtitle dwell audio focus released")
     }
 
-    private fun createPlayingState(): PlaybackState {
+    private fun createPlayingState(activeQueueItemId: Long): PlaybackState {
         return PlaybackState.Builder()
-            .setActions(0L)
+            .setActions(
+                PlaybackState.ACTION_PLAY or
+                    PlaybackState.ACTION_PAUSE or
+                    PlaybackState.ACTION_PLAY_PAUSE or
+                    PlaybackState.ACTION_STOP
+            )
             .setState(
                 PlaybackState.STATE_PLAYING,
-                PlaybackState.PLAYBACK_POSITION_UNKNOWN,
+                0L,
                 1f,
                 SystemClock.elapsedRealtime()
             )
+            .setActiveQueueItemId(activeQueueItemId)
             .build()
     }
 
@@ -198,5 +239,11 @@ object BluetoothMediaTitleBridge {
                     normalized.take(MAX_TITLE_LENGTH - 1) + "…"
                 }
             }
+    }
+
+    private fun String.logPreview(): String {
+        return replace(Regex("\\s+"), " ")
+            .trim()
+            .let { if (it.length <= 24) it else it.take(24) + "..." }
     }
 }

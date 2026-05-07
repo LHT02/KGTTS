@@ -171,9 +171,27 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
         if (message.isEmpty()) return null
         if (currentSettings.ttsDisabled) return null
         val voice = currentState().voiceDir ?: return null
+        val activeController = ensureController()
+        if (!activeController.isTtsReadyFor(voice)) {
+            val queuedId = activeController.enqueueSpeakTextPendingTts(
+                message,
+                interruptCurrent = interruptCurrent
+            ) ?: return null
+            serviceScope.launch(Dispatchers.IO) {
+                val loaded = activeController.loadTts(voice)
+                if (!loaded && currentState().voiceDir?.absolutePath == voice.absolutePath) {
+                    updateStatus(
+                        if (isSystemTtsVoiceDir(voice)) {
+                            "系统 TTS 初始化失败，请先完成系统 TTS 设置"
+                        } else {
+                            "音色包加载失败"
+                        }
+                    )
+                }
+            }
+            return queuedId
+        }
         return withContext(Dispatchers.IO) {
-            val activeController = ensureController()
-            if (!activeController.loadTts(voice)) return@withContext null
             activeController.enqueueSpeakText(message, interruptCurrent = interruptCurrent)
         }
     }
@@ -494,7 +512,11 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
         serviceScope.launch {
             val settings = UserPrefs.getSettings(applicationContext)
             currentSettings = settings
-            BluetoothMediaTitleBridge.setEnabled(applicationContext, settings.bluetoothMediaTitleSubtitle)
+            BluetoothMediaTitleBridge.setEnabled(
+                applicationContext,
+                settings.bluetoothMediaTitleSubtitle,
+                loadCommittedQuickSubtitleText()
+            )
             syncBluetoothMediaTitleToCommittedQuickSubtitleConfig()
             val resetBackend = ensureSpeakerBackend(settings)
             speakerProfiles = if (resetBackend) {
@@ -577,7 +599,11 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
                 currentSettings = next
                 SoundboardManager.setPlaybackGainPercent(next.playbackGainPercent)
                 SoundboardManager.setAudioFocusAvoidanceMode(applicationContext, next.audioFocusAvoidanceMode)
-                BluetoothMediaTitleBridge.setEnabled(applicationContext, next.bluetoothMediaTitleSubtitle)
+                BluetoothMediaTitleBridge.setEnabled(
+                    applicationContext,
+                    next.bluetoothMediaTitleSubtitle,
+                    loadCommittedQuickSubtitleText()
+                )
                 if (next.bluetoothMediaTitleSubtitle) {
                     syncBluetoothMediaTitleToCommittedQuickSubtitleConfig()
                 }
