@@ -398,6 +398,15 @@ declare global {
       ensureTextPresetFile: (name: string, text: string) => Promise<string>
       getPathForFile?: (file: File) => string
     }
+    soundboardBridge?: {
+      exportPackage: (
+        config: unknown,
+        outputPath: string,
+      ) => Promise<{ ok: boolean; path?: string; message?: string }>
+      importPackage: (
+        packagePath: string,
+      ) => Promise<{ ok: boolean; config?: unknown; message?: string }>
+    }
     clipboardBridge?: {
       readText: () => string
       writeText: (text: string) => void

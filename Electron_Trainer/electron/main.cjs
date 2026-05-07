@@ -285,6 +285,219 @@ function createWindow() {
   });
 }
 
+function sanitizeSoundboardFileSegment(raw) {
+  return String(raw || '')
+    .trim()
+    .replace(/[\\/:*?"<>|\s]+/g, '_')
+    .slice(0, 48) || 'audio';
+}
+
+function resolve7zaPath() {
+  const candidates = [];
+  if (!isDev) {
+    candidates.push(path.join(process.resourcesPath, 'tools', '7za.exe'));
+  }
+  candidates.push(path.join(__dirname, '..', 'node_modules', '7zip-bin', 'win', 'x64', '7za.exe'));
+  candidates.push(path.join(__dirname, '..', '..', 'Electron_Trainer', 'node_modules', '7zip-bin', 'win', 'x64', '7za.exe'));
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return '';
+}
+
+function runProcess(exe, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(exe, args, {
+      ...opts,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr?.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(new Error((stderr || stdout || `${exe} exited with code ${code}`).trim()));
+    });
+  });
+}
+
+function normalizeSoundboardExportConfig(config) {
+  const groups = Array.isArray(config?.groups) ? config.groups : [];
+  return {
+    selectedGroupId: Number(config?.selectedGroupId) || Number(groups[0]?.id) || 1,
+    portraitLayout: String(config?.portraitLayout || 'list'),
+    landscapeLayout: String(config?.landscapeLayout || 'grid_5'),
+    groups: groups.map((group, groupIndex) => ({
+      id: Number(group?.id) || groupIndex + 1,
+      title: String(group?.title || '').trim() || '未命名分组',
+      icon: String(group?.icon || '').trim() || 'music_note',
+      keywordWakeEnabled: group?.keywordWakeEnabled !== false,
+      items: (Array.isArray(group?.items) ? group.items : []).map((item, itemIndex) => ({
+        id: Number(item?.id) || itemIndex + 1,
+        title: String(item?.title || '').trim() || '新音效',
+        wakeWord: String(item?.wakeWord || '').trim(),
+        audioPath: String(item?.audioPath || '').trim(),
+        durationMs: Math.max(0, Number(item?.durationMs) || 0),
+        trimStartMs: Math.max(0, Number(item?.trimStartMs) || 0),
+        trimEndMs: Math.max(0, Number(item?.trimEndMs) || 0),
+      })),
+    })),
+  };
+}
+
+async function exportSoundboardPackage(config, outputPath) {
+  const sevenZip = resolve7zaPath();
+  if (!sevenZip) {
+    return { ok: false, message: '缺少 7z 打包组件，请重新安装 KIGTTS Trainer。' };
+  }
+  const normalized = normalizeSoundboardExportConfig(config);
+  if (!normalized.groups.some((group) => group.items.length > 0)) {
+    return { ok: false, message: '音效包里还没有音效。' };
+  }
+  let outPath = String(outputPath || '').trim();
+  if (!outPath) {
+    return { ok: false, message: '未选择导出路径。' };
+  }
+  if (!outPath.toLowerCase().endsWith('.kigspk')) {
+    outPath += '.kigspk';
+  }
+  const tempRoot = fs.mkdtempSync(path.join(app.getPath('temp'), 'kigtts-soundboard-export-'));
+  try {
+    const audioDir = path.join(tempRoot, 'audio');
+    fs.mkdirSync(audioDir, { recursive: true });
+    const usedEntries = new Set();
+    const root = {
+      type: 'soundboard',
+      version: 1,
+      selectedGroupId: normalized.groups[0]?.id || normalized.selectedGroupId,
+      portraitLayout: normalized.portraitLayout,
+      landscapeLayout: normalized.landscapeLayout,
+      groups: normalized.groups.map((group) => ({
+        id: group.id,
+        title: group.title,
+        icon: group.icon,
+        keywordWakeEnabled: group.keywordWakeEnabled,
+        items: group.items.map((item) => {
+          let audioFile = '';
+          if (item.audioPath && fs.existsSync(item.audioPath)) {
+            const ext = path.extname(item.audioPath) || '.audio';
+            let entry = `audio/${sanitizeSoundboardFileSegment(item.title)}_${item.id}${ext}`;
+            let suffix = 2;
+            while (usedEntries.has(entry)) {
+              entry = `audio/${sanitizeSoundboardFileSegment(item.title)}_${item.id}_${suffix}${ext}`;
+              suffix += 1;
+            }
+            usedEntries.add(entry);
+            fs.copyFileSync(item.audioPath, path.join(tempRoot, entry));
+            audioFile = entry.replace(/\\/g, '/');
+          }
+          return {
+            id: item.id,
+            title: item.title,
+            wakeWord: item.wakeWord,
+            durationMs: item.durationMs,
+            trimStartMs: item.trimStartMs,
+            trimEndMs: item.trimEndMs || item.durationMs || 0,
+            audioFile,
+          };
+        }),
+      })),
+    };
+    fs.writeFileSync(path.join(tempRoot, 'preset.json'), JSON.stringify(root, null, 2), 'utf8');
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    if (fs.existsSync(outPath)) fs.rmSync(outPath, { force: true });
+    await runProcess(sevenZip, ['a', '-tzip', outPath, '.\\*', '-mx=5'], { cwd: tempRoot });
+    return { ok: true, path: outPath };
+  } catch (err) {
+    return { ok: false, message: String(err?.message || err) };
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+async function importSoundboardPackage(packagePath) {
+  const sevenZip = resolve7zaPath();
+  if (!sevenZip) {
+    return { ok: false, message: '缺少 7z 解包组件，请重新安装 KIGTTS Trainer。' };
+  }
+  const source = String(packagePath || '').trim();
+  if (!source || !fs.existsSync(source)) {
+    return { ok: false, message: '音效包文件不存在。' };
+  }
+  const extractDir = fs.mkdtempSync(path.join(app.getPath('temp'), 'kigtts-soundboard-import-'));
+  const importRoot = path.join(app.getPath('userData'), 'soundboard_editor', 'imports', String(Date.now()));
+  try {
+    await runProcess(sevenZip, ['x', source, `-o${extractDir}`, '-y']);
+    const presetPath = path.join(extractDir, 'preset.json');
+    if (!fs.existsSync(presetPath)) {
+      return { ok: false, message: '音效包缺少 preset.json。' };
+    }
+    const root = JSON.parse(fs.readFileSync(presetPath, 'utf8'));
+    if (root?.type !== 'soundboard') {
+      return { ok: false, message: '这不是 KIGTTS 音效包。' };
+    }
+    const audioOutDir = path.join(importRoot, 'audio');
+    fs.mkdirSync(audioOutDir, { recursive: true });
+    const groups = (Array.isArray(root.groups) ? root.groups : []).map((group, groupIndex) => ({
+      id: Number(group?.id) || groupIndex + 1,
+      title: String(group?.title || '').trim() || '未命名分组',
+      icon: String(group?.icon || '').trim() || 'music_note',
+      keywordWakeEnabled: group?.keywordWakeEnabled !== false,
+      items: (Array.isArray(group?.items) ? group.items : []).map((item, itemIndex) => {
+        const audioEntry = String(item?.audioFile || '').replace(/\\/g, '/').replace(/^\/+/, '');
+        let audioPath = '';
+        if (audioEntry && !audioEntry.includes('../')) {
+          const extractedAudio = path.join(extractDir, audioEntry);
+          if (fs.existsSync(extractedAudio)) {
+            const targetName = `${sanitizeSoundboardFileSegment(item?.title || 'audio')}_${Date.now()}_${itemIndex}${path.extname(extractedAudio) || '.audio'}`;
+            audioPath = path.join(audioOutDir, targetName);
+            fs.copyFileSync(extractedAudio, audioPath);
+          }
+        }
+        return {
+          id: Number(item?.id) || itemIndex + 1,
+          title: String(item?.title || '').trim() || '新音效',
+          wakeWord: String(item?.wakeWord || '').trim(),
+          audioPath,
+          durationMs: Math.max(0, Number(item?.durationMs) || 0),
+          trimStartMs: Math.max(0, Number(item?.trimStartMs) || 0),
+          trimEndMs: Math.max(0, Number(item?.trimEndMs) || Number(item?.durationMs) || 0),
+        };
+      }),
+    }));
+    if (!groups.length) {
+      return { ok: false, message: '音效包里没有可导入分组。' };
+    }
+    return {
+      ok: true,
+      message: `已导入 ${groups.length} 个分组。`,
+      config: {
+        selectedGroupId: Number(root.selectedGroupId) || groups[0].id,
+        portraitLayout: String(root.portraitLayout || 'list'),
+        landscapeLayout: String(root.landscapeLayout || 'grid_5'),
+        groups,
+      },
+    };
+  } catch (err) {
+    fs.rmSync(importRoot, { recursive: true, force: true });
+    return { ok: false, message: String(err?.message || err) };
+  } finally {
+    fs.rmSync(extractDir, { recursive: true, force: true });
+  }
+}
+
 app.whenReady().then(() => {
   createWindow();
   startBackend();
@@ -640,6 +853,14 @@ app.whenReady().then(() => {
     } catch (err) {
       return '';
     }
+  });
+
+  ipcMain.handle('soundboard:exportPackage', async (_, payload = {}) => {
+    return exportSoundboardPackage(payload.config, payload.outputPath);
+  });
+
+  ipcMain.handle('soundboard:importPackage', async (_, packagePath) => {
+    return importSoundboardPackage(packagePath);
   });
 
   app.on('activate', () => {
