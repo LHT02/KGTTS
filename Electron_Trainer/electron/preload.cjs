@@ -58,6 +58,11 @@ contextBridge.exposeInMainWorld('fsBridge', {
   },
 });
 
+contextBridge.exposeInMainWorld('soundboardBridge', {
+  exportPackage: (config, outputPath) => ipcRenderer.invoke('soundboard:exportPackage', { config, outputPath }),
+  importPackage: (packagePath) => ipcRenderer.invoke('soundboard:importPackage', packagePath),
+});
+
 contextBridge.exposeInMainWorld('clipboardBridge', {
   readText: () => clipboard.readText(),
   writeText: (text) => clipboard.writeText(text || ''),

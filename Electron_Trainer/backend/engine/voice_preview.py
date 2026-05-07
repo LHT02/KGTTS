@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,17 @@ from .resource_paths import resolve_resources_root
 from .runtime_manager import resolve_cuda_python, resolve_piper_runtime_python
 
 PREVIEW_TAIL_PAD_SECONDS = 0.25
+PREVIEW_PUNCT_PAUSE_SECONDS = 0.2
+PREVIEW_SPLIT_PUNCT = set("，,。.!！？?；;：:")
+PREVIEW_PUNCT_ALIASES = {
+    "，": ",",
+    "。": ".",
+    "！": "!",
+    "？": "?",
+    "：": ":",
+    "；": ";",
+    "、": ",",
+}
 
 
 def _base_dir() -> Path:
@@ -27,6 +39,37 @@ def _base_dir() -> Path:
 def _progress(cb: Optional[Callable[[str, float, str], None]], value: float, msg: str) -> None:
     if cb:
         cb("preview", value, msg)
+
+
+def _normalize_preview_text(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not cleaned:
+        return ""
+    tail = next((ch for ch in reversed(cleaned) if not ch.isspace()), "")
+    if tail not in PREVIEW_SPLIT_PUNCT:
+        cleaned += "。"
+    return cleaned
+
+
+def _split_preview_text(text: str) -> List[str]:
+    normalized = _normalize_preview_text(text)
+    if not normalized:
+        return []
+    segments: List[str] = []
+    buf: List[str] = []
+    for ch in normalized:
+        if ch.isspace() and not buf:
+            continue
+        buf.append(ch)
+        if ch in PREVIEW_SPLIT_PUNCT:
+            segment = "".join(buf).strip()
+            if segment:
+                segments.append(segment)
+            buf = []
+    tail = "".join(buf).strip()
+    if tail:
+        segments.append(_normalize_preview_text(tail))
+    return segments
 
 
 def _load_voicepack_base(voicepack_path: Path, temp_dir: Path) -> Tuple[Path, dict]:
@@ -158,20 +201,11 @@ def _phonemize_espeak(text: str, voice: str) -> List[str]:
 
 
 def _pick_trailing_punct(text: str) -> Optional[str]:
-    mapping = {
-        "，": ",",
-        "。": ".",
-        "！": "!",
-        "？": "?",
-        "：": ":",
-        "；": ";",
-        "、": ",",
-    }
     for ch in reversed(text):
         if ch.isspace():
             continue
-        if ch in mapping:
-            return mapping[ch]
+        if ch in PREVIEW_PUNCT_ALIASES:
+            return PREVIEW_PUNCT_ALIASES[ch]
         if ch in ",.!?;:":
             return ch
         break
@@ -237,17 +271,27 @@ def _text_to_espeak_ids(text: str, cfg: dict) -> List[int]:
 
 
 def _text_to_phoneme_ids(text: str, mapping: Dict[str, List[str]], id_map: dict) -> List[int]:
+    def pick_id(key: str, fallback_id: int) -> int:
+        raw = id_map.get(key)
+        if raw is None and key in PREVIEW_PUNCT_ALIASES:
+            raw = id_map.get(PREVIEW_PUNCT_ALIASES[key])
+        if raw is None:
+            return fallback_id
+        if isinstance(raw, list):
+            return int(raw[0]) if raw else fallback_id
+        return int(raw)
+
     ids: List[int] = []
-    fallback = int(id_map.get("_", 0))
+    fallback = pick_id("_", 0)
     for ch in text:
         if ch.isspace():
             continue
         phones = mapping.get(ch)
         if phones:
             for ph in phones:
-                ids.append(int(id_map.get(ph, fallback)))
+                ids.append(pick_id(ph, fallback))
         else:
-            ids.append(int(id_map.get(ch, fallback)))
+            ids.append(pick_id(ch, fallback))
     return ids
 
 
@@ -417,20 +461,25 @@ def _synthesize_voicepack_inprocess(
         id_map = cfg.get("phoneme_id_map") or {}
         if not id_map:
             raise RuntimeError("语音包缺少发音映射信息，无法试听。")
-        if phoneme_type == "espeak":
-            ids = _text_to_espeak_ids(text, cfg)
-        elif phoneme_type == "text":
+        text_segments = _split_preview_text(text)
+        if not text_segments:
+            raise RuntimeError("试听文本为空，请输入要朗读的内容。")
+        phoneme_map: Optional[Dict[str, List[str]]] = None
+        if phoneme_type == "text":
             phoneme_map = _load_phonemizer_dict(dict_path)
-            ids = _text_to_phoneme_ids(text, phoneme_map, id_map)
-        else:
+        elif phoneme_type != "espeak":
             raise RuntimeError("当前语音包格式暂不支持试听。")
-        if not ids:
-            raise RuntimeError("试听文本无法转换为可朗读内容，请换一段文本再试。")
 
         infer_cfg = cfg.get("inference") or {}
         noise_scale = float(infer_cfg.get("noise_scale", 0.667))
         length_scale = float(infer_cfg.get("length_scale", 1.0))
         noise_w = float(infer_cfg.get("noise_w", infer_cfg.get("noise_scale_w", 0.8)))
+        sample_rate = int(
+            manifest.get("sample_rate")
+            or cfg.get("audio", {}).get("sample_rate")
+            or cfg.get("sample_rate")
+            or 22050
+        )
 
         _progress(progress, 0.35, "加载 ONNX 模型")
         sess = _create_ort_session(ort, model_path)
@@ -442,25 +491,41 @@ def _synthesize_voicepack_inprocess(
         scale_name = _pick_input(input_names, ["scale"])
         sid_name = _pick_input(input_names, ["sid", "speaker"])
 
-        inputs = {
-            input_name: np.array([ids], dtype=np.int64),
-            length_name: np.array([len(ids)], dtype=np.int64),
-        }
-        if scale_name:
-            inputs[scale_name] = np.array([noise_scale, length_scale, noise_w], dtype=np.float32)
-        if sid_name:
-            inputs[sid_name] = np.array([0], dtype=np.int64)
+        audio_chunks = []
+        pause = np.zeros(max(1, int(sample_rate * PREVIEW_PUNCT_PAUSE_SECONDS)), dtype=np.float32)
+        for index, segment in enumerate(text_segments):
+            if phoneme_type == "espeak":
+                ids = _text_to_espeak_ids(segment, cfg)
+            elif phoneme_map is not None:
+                ids = _text_to_phoneme_ids(segment, phoneme_map, id_map)
+            else:
+                ids = []
+            if not ids:
+                continue
 
-        _progress(progress, 0.55, "模型推理中")
-        audio = sess.run(None, inputs)[0]
-        audio = np.squeeze(audio)
-        audio = np.clip(audio, -1.0, 1.0)
-        sample_rate = int(
-            manifest.get("sample_rate")
-            or cfg.get("audio", {}).get("sample_rate")
-            or cfg.get("sample_rate")
-            or 22050
-        )
+            inputs = {
+                input_name: np.array([ids], dtype=np.int64),
+                length_name: np.array([len(ids)], dtype=np.int64),
+            }
+            if scale_name:
+                inputs[scale_name] = np.array([noise_scale, length_scale, noise_w], dtype=np.float32)
+            if sid_name:
+                inputs[sid_name] = np.array([0], dtype=np.int64)
+
+            _progress(progress, 0.55 + 0.25 * ((index + 1) / max(1, len(text_segments))), f"模型推理中 {index + 1}/{len(text_segments)}")
+            chunk = sess.run(None, inputs)[0]
+            chunk = np.squeeze(chunk).astype(np.float32, copy=False)
+            if chunk.ndim == 0:
+                chunk = chunk.reshape(1)
+            chunk = np.clip(chunk, -1.0, 1.0)
+            audio_chunks.append(chunk)
+            if index < len(text_segments) - 1:
+                audio_chunks.append(pause)
+
+        if not audio_chunks:
+            raise RuntimeError("试听文本无法转换为可朗读内容，请换一段文本再试。")
+
+        audio = np.concatenate(audio_chunks)
         tail_pad = np.zeros(max(1, int(sample_rate * PREVIEW_TAIL_PAD_SECONDS)), dtype=audio.dtype)
         audio = np.concatenate([audio, tail_pad])
         audio_i16 = (audio * 32767.0).astype(np.int16)

@@ -1,4 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type SyntheticEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type SyntheticEvent,
+} from 'react'
 import {
   Box,
   Button,
@@ -192,6 +201,61 @@ type DistillTextPresetOption = {
   recommended?: boolean
 }
 
+type SoundboardLayoutValue = 'list' | 'grid_2' | 'grid_3' | 'grid_4' | 'grid_5' | 'grid_6' | 'grid_7' | 'grid_8'
+
+type SoundboardEditorItem = {
+  id: number
+  title: string
+  wakeWord: string
+  audioPath: string
+  durationMs: number
+  trimStartMs: number
+  trimEndMs: number
+}
+
+type SoundboardEditorGroup = {
+  id: number
+  title: string
+  icon: string
+  keywordWakeEnabled: boolean
+  items: SoundboardEditorItem[]
+}
+
+type SoundboardEditorConfig = {
+  selectedGroupId: number
+  portraitLayout: SoundboardLayoutValue
+  landscapeLayout: SoundboardLayoutValue
+  groups: SoundboardEditorGroup[]
+}
+
+type SoundboardBatchEditState = {
+  titlePrefix: string
+  titleSuffix: string
+  wakeWord: string
+  replaceWakeWord: boolean
+  targetGroupId: string
+}
+
+type SoundboardItemDragState = {
+  itemId: number
+  pointerId: number
+  originIndex: number
+  targetIndex: number
+  startY: number
+  pointerOffsetY: number
+  rowHeight: number
+  rowGap: number
+  rowCenters: number[]
+  startScrollTop: number
+}
+
+type SoundboardPreviewPlaybackState = {
+  playing: boolean
+  currentTime: number
+  duration: number
+  requestId: number
+}
+
 type GsviAttributionFields = {
   gsvAuthor: string
   gsvTrainer: string
@@ -213,6 +277,7 @@ const DRAWER_EXPANDED_STORAGE_KEY = 'kgtts_drawer_expanded'
 const DISTILL_SETTINGS_STORAGE_KEY = 'kigtts_gsv_distill_settings'
 const VOXCPM_SETTINGS_STORAGE_KEY = 'kigtts_voxcpm_distill_settings'
 const DISTILL_MODE_STORAGE_KEY = 'kigtts_training_mode'
+const SOUNDBOARD_EDITOR_STORAGE_KEY = 'kigtts_soundboard_editor_config'
 const GSVI_CONFIRM_SKIP_STORAGE_KEY = 'kigtts_gsvi_confirm_skip'
 const GSVI_MODE_INTRO_SKIP_STORAGE_KEY = 'kigtts_gsvi_mode_intro_skip'
 const GSVI_GUIDE_URL = 'https://www.yuque.com/baicaigongchang1145haoyuangong/ib3g1e/gos50nrqrlipryqq'
@@ -263,7 +328,7 @@ const DEPENDENCY_GUIDE_TARGET_META: Record<DependencyGuideTarget, DependencyGuid
     installLabel: '下载 VoxCPM2 模型',
   },
 }
-type AppPage = 'guide' | 'prep' | 'settings' | 'preview' | 'logs' | 'about'
+type AppPage = 'guide' | 'prep' | 'settings' | 'preview' | 'soundboard' | 'logs' | 'about'
 type AboutDialogKind = 'openSource' | 'privacy' | null
 const STAGE_LABEL: Record<ProgressStage, string> = {
   collect: '收集',
@@ -332,10 +397,36 @@ const GSVI_REQUIRED_NAMES = {
   gsviPacker: 'AI-Hobbyist',
 } as const
 const DISTILL_TEXT_SOURCE_EMPTY_HINT = '点击右上角 + 添加内置预设文本，或导入 / 拖入自定义 .txt、.csv、.jsonl 文本文件。'
+const SOUNDBOARD_AUDIO_EXTENSIONS = ['wav', 'mp3', 'm4a', 'aac', 'flac', 'ogg', 'opus']
+const SOUNDBOARD_GROUP_ICONS = [
+  'music_note',
+  'campaign',
+  'mood',
+  'celebration',
+  'pets',
+  'favorite',
+  'stars',
+  'sports_esports',
+  'notifications',
+  'record_voice_over',
+  'theater_comedy',
+  'bolt',
+]
+const SOUNDBOARD_LAYOUT_OPTIONS: Array<{ value: SoundboardLayoutValue; label: string }> = [
+  { value: 'list', label: '列表' },
+  { value: 'grid_2', label: '两列宫格' },
+  { value: 'grid_3', label: '三列宫格' },
+  { value: 'grid_4', label: '四列宫格' },
+  { value: 'grid_5', label: '五列宫格' },
+  { value: 'grid_6', label: '六列宫格' },
+  { value: 'grid_7', label: '七列宫格' },
+  { value: 'grid_8', label: '八列宫格' },
+]
 const NAV_ITEMS: Array<{ key: AppPage; label: string; icon: string }> = [
   { key: 'guide', label: '快速开始', icon: 'rocket_launch' },
   { key: 'prep', label: '训练准备', icon: 'folder' },
   { key: 'preview', label: '语音包试听', icon: 'record_voice_over' },
+  { key: 'soundboard', label: '音效包编辑', icon: 'library_music' },
   { key: 'settings', label: '训练设置', icon: 'tune' },
   { key: 'logs', label: '日志', icon: 'article' },
   { key: 'about', label: '关于', icon: 'info' },
@@ -390,6 +481,97 @@ const DISTILL_TEXT_PRESET_OPTIONS: DistillTextPresetOption[] = [
     loadContent: async () => (await import('../../SampleText/15万字文本库.txt?raw')).default,
   },
 ]
+
+const nowId = () => Date.now() + Math.floor(Math.random() * 100000)
+
+const defaultSoundboardEditorConfig = (): SoundboardEditorConfig => ({
+  selectedGroupId: 1,
+  portraitLayout: 'list',
+  landscapeLayout: 'grid_5',
+  groups: [
+    {
+      id: 1,
+      title: '常用音效',
+      icon: 'music_note',
+      keywordWakeEnabled: true,
+      items: [],
+    },
+  ],
+})
+
+const normalizeSoundboardLayoutValue = (value: unknown, fallback: SoundboardLayoutValue): SoundboardLayoutValue => {
+  return SOUNDBOARD_LAYOUT_OPTIONS.some((item) => item.value === value) ? (value as SoundboardLayoutValue) : fallback
+}
+
+const normalizeSoundboardEditorConfig = (input: unknown): SoundboardEditorConfig => {
+  const fallback = defaultSoundboardEditorConfig()
+  if (!input || typeof input !== 'object') return fallback
+  const root = input as Partial<SoundboardEditorConfig>
+  const groupsRaw = Array.isArray(root.groups) ? root.groups : []
+  const groups = groupsRaw
+    .map((groupRaw, groupIndex) => {
+      const group = groupRaw as Partial<SoundboardEditorGroup>
+      const itemsRaw = Array.isArray(group.items) ? group.items : []
+      const items = itemsRaw.map((itemRaw, itemIndex) => {
+        const item = itemRaw as Partial<SoundboardEditorItem>
+        const duration = Number(item.durationMs) || 0
+        return {
+          id: Number(item.id) || nowId() + itemIndex,
+          title: String(item.title || '').trim() || '新音效',
+          wakeWord: String(item.wakeWord || '').trim(),
+          audioPath: String(item.audioPath || '').trim(),
+          durationMs: Math.max(0, duration),
+          trimStartMs: Math.max(0, Number(item.trimStartMs) || 0),
+          trimEndMs: Math.max(0, Number(item.trimEndMs) || duration || 0),
+        }
+      })
+      return {
+        id: Number(group.id) || groupIndex + 1,
+        title: String(group.title || '').trim() || '未命名分组',
+        icon: String(group.icon || '').trim() || 'music_note',
+        keywordWakeEnabled: group.keywordWakeEnabled !== false,
+        items,
+      }
+    })
+    .filter((group) => group.title || group.items.length)
+  const safeGroups = groups.length ? groups : fallback.groups
+  const selectedGroupId = Number(root.selectedGroupId)
+  return {
+    selectedGroupId: safeGroups.some((group) => group.id === selectedGroupId) ? selectedGroupId : safeGroups[0].id,
+    portraitLayout: normalizeSoundboardLayoutValue(root.portraitLayout, 'list'),
+    landscapeLayout: normalizeSoundboardLayoutValue(root.landscapeLayout, 'grid_5'),
+    groups: safeGroups,
+  }
+}
+
+const readSavedSoundboardEditorConfig = (): SoundboardEditorConfig => {
+  try {
+    const raw = window.localStorage.getItem(SOUNDBOARD_EDITOR_STORAGE_KEY)
+    if (!raw) return defaultSoundboardEditorConfig()
+    return normalizeSoundboardEditorConfig(JSON.parse(raw))
+  } catch {
+    return defaultSoundboardEditorConfig()
+  }
+}
+
+const soundboardFileTitle = (filePath: string) => {
+  const name = filePath.split(/[\\/]/).pop() || '新音效'
+  return name.replace(/\.[^.]+$/, '').trim() || '新音效'
+}
+
+const isSoundboardAudioPath = (filePath: string) => {
+  const ext = filePath.split('.').pop()?.toLowerCase() || ''
+  return SOUNDBOARD_AUDIO_EXTENSIONS.includes(ext)
+}
+
+const formatDurationMsForSoundboard = (ms: number) => {
+  const safe = Math.max(0, Math.floor(ms || 0))
+  const totalSeconds = Math.floor(safe / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  const fraction = Math.floor((safe % 1000) / 100)
+  return `${minutes}:${String(seconds).padStart(2, '0')}.${fraction}`
+}
 
 const MsIcon = ({
   name,
@@ -1128,6 +1310,8 @@ const formatTime = (value: number) => {
   return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
 }
 
+const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
 const InlineAudioPlayer = ({
   src,
   audioPath,
@@ -1142,18 +1326,6 @@ const InlineAudioPlayer = ({
   const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
   const hasAudio = Boolean(src)
-
-  useEffect(() => {
-    const audio = audioRef.current
-    if (audio) {
-      audio.pause()
-      audio.currentTime = 0
-      audio.load()
-    }
-    setPlaying(false)
-    setDuration(0)
-    setCurrentTime(0)
-  }, [src])
 
   const togglePlay = () => {
     const audio = audioRef.current
@@ -1219,9 +1391,15 @@ const InlineAudioPlayer = ({
       </Typography>
       <Box
         component="audio"
+        key={src || 'empty-audio'}
         ref={audioRef}
         src={src}
         preload="metadata"
+        onLoadStart={() => {
+          setPlaying(false)
+          setDuration(0)
+          setCurrentTime(0)
+        }}
         onLoadedMetadata={(event: SyntheticEvent<HTMLAudioElement>) => {
           const audio = event.currentTarget
           setDuration(Number.isFinite(audio.duration) ? audio.duration : 0)
@@ -1411,6 +1589,19 @@ function App() {
   const requestId = useRef(1)
   const defaultsRequested = useRef(false)
   const previewAudioRef = useRef<HTMLAudioElement | null>(null)
+  const soundboardItemScrollRef = useRef<HTMLDivElement | null>(null)
+  const soundboardItemListRef = useRef<HTMLDivElement | null>(null)
+  const soundboardItemAudioRef = useRef<HTMLAudioElement | null>(null)
+  const soundboardItemDragRef = useRef<SoundboardItemDragState | null>(null)
+  const soundboardCommitDragRef = useRef<(drag: SoundboardItemDragState) => void>(() => undefined)
+  const soundboardPlayPreviewRef = useRef<() => void>(() => undefined)
+  const soundboardApplyDragPositionRef = useRef<(clientY: number) => void>(() => undefined)
+  const soundboardUpdateAutoScrollRef = useRef<(clientY: number) => void>(() => undefined)
+  const soundboardClearDraggedRowStyleRef = useRef<(itemId: number) => void>(() => undefined)
+  const soundboardPreviewSrcRef = useRef('')
+  const soundboardDragPointerYRef = useRef(0)
+  const soundboardDragAutoScrollFrameRef = useRef(0)
+  const soundboardDragAutoScrollSpeedRef = useRef(0)
   const abortingPipelineRef = useRef(false)
   const pingRequestIdRef = useRef<string | null>(null)
   const pendingRequestsRef = useRef<Map<string, PendingRequest>>(new Map())
@@ -1568,6 +1759,27 @@ function App() {
     DISTILL_TEXT_PRESET_OPTIONS.find((item) => item.recommended)?.key ?? DISTILL_TEXT_PRESET_OPTIONS[0]?.key ?? '',
   )
   const [avatarDragActive, setAvatarDragActive] = useState(false)
+  const [soundboardConfig, setSoundboardConfig] = useState<SoundboardEditorConfig>(() => readSavedSoundboardEditorConfig())
+  const [soundboardSelectedItemIds, setSoundboardSelectedItemIds] = useState<number[]>([])
+  const [soundboardDragActive, setSoundboardDragActive] = useState(false)
+  const [soundboardItemDrag, setSoundboardItemDrag] = useState<SoundboardItemDragState | null>(null)
+  const [soundboardPreviewItemId, setSoundboardPreviewItemId] = useState<number | null>(null)
+  const [soundboardPreviewPlayback, setSoundboardPreviewPlayback] = useState<SoundboardPreviewPlaybackState>({
+    playing: false,
+    currentTime: 0,
+    duration: 0,
+    requestId: 0,
+  })
+  const [soundboardExporting, setSoundboardExporting] = useState(false)
+  const [soundboardImporting, setSoundboardImporting] = useState(false)
+  const [soundboardBatchEditOpen, setSoundboardBatchEditOpen] = useState(false)
+  const [soundboardBatchEdit, setSoundboardBatchEdit] = useState<SoundboardBatchEditState>({
+    titlePrefix: '',
+    titleSuffix: '',
+    wakeWord: '',
+    replaceWakeWord: false,
+    targetGroupId: '',
+  })
 
   const [progress, setProgress] = useState<ProgressMap>(emptyProgress)
   const [pipelineRunning, setPipelineRunning] = useState(false)
@@ -1713,6 +1925,24 @@ function App() {
     return `${base}${sep}v=${voxcpmBootstrapPreviewAudioRev}`
   }, [voxcpmBootstrapPreviewAudioPath, voxcpmBootstrapPreviewAudioRev])
   const hasPreviewAudio = Boolean(previewAudioSrc)
+  const soundboardSelectedGroupIndex = Math.max(
+    0,
+    soundboardConfig.groups.findIndex((group) => group.id === soundboardConfig.selectedGroupId),
+  )
+  const soundboardSelectedGroup = soundboardConfig.groups[soundboardSelectedGroupIndex] ?? soundboardConfig.groups[0]
+  const soundboardPreviewItem =
+    soundboardSelectedGroup?.items.find((item) => item.id === soundboardPreviewItemId) ?? null
+  const soundboardPreviewSrc = soundboardPreviewItem?.audioPath ? toFileUrl(soundboardPreviewItem.audioPath) : ''
+  soundboardPreviewSrcRef.current = soundboardPreviewSrc
+  const soundboardPreviewStartSec = Math.max(0, (soundboardPreviewItem?.trimStartMs ?? 0) / 1000)
+  const soundboardPreviewEndSec = Math.max(
+    soundboardPreviewStartSec,
+    ((soundboardPreviewItem?.trimEndMs || soundboardPreviewItem?.durationMs || 0) / 1000) || soundboardPreviewPlayback.duration || 0,
+  )
+  const soundboardPreviewSpanSec = Math.max(0.01, soundboardPreviewEndSec - soundboardPreviewStartSec)
+  const soundboardPreviewRelativeTime = clampNumber(soundboardPreviewPlayback.currentTime - soundboardPreviewStartSec, 0, soundboardPreviewSpanSec)
+  const soundboardPreviewProgress = soundboardPreviewItem ? (soundboardPreviewRelativeTime / soundboardPreviewSpanSec) * 100 : 0
+  const activeSoundboardDragSession = soundboardItemDrag ? `${soundboardItemDrag.itemId}:${soundboardItemDrag.pointerId}` : ''
   const textContextCaps = useMemo(
     () => getTextContextCapabilities(textContextMenu.target),
     [textContextMenu.target],
@@ -2086,6 +2316,522 @@ function App() {
   const saveDroppedFileSingle = async (files: File[]) => {
     const saved = await saveDroppedFiles(files)
     return saved[0] ?? null
+  }
+
+  const readSoundboardAudioDurationMs = async (audioPath: string) => {
+    if (!audioPath) return 0
+    return new Promise<number>((resolve) => {
+      const audio = new Audio()
+      const timer = window.setTimeout(() => {
+        cleanup()
+        resolve(0)
+      }, 3500)
+      const cleanup = () => {
+        window.clearTimeout(timer)
+        audio.removeAttribute('src')
+        audio.load()
+      }
+      audio.addEventListener(
+        'loadedmetadata',
+        () => {
+          const duration = Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : 0
+          cleanup()
+          resolve(duration)
+        },
+        { once: true },
+      )
+      audio.addEventListener(
+        'error',
+        () => {
+          cleanup()
+          resolve(0)
+        },
+        { once: true },
+      )
+      audio.preload = 'metadata'
+      audio.src = toFileUrl(audioPath)
+    })
+  }
+
+  const updateSoundboardConfig = (updater: (config: SoundboardEditorConfig) => SoundboardEditorConfig) => {
+    setSoundboardConfig((prev) => normalizeSoundboardEditorConfig(updater(prev)))
+  }
+
+  const addSoundboardAudioPaths = async (paths: string[]) => {
+    const audioPaths = paths.filter(isSoundboardAudioPath)
+    if (!audioPaths.length) {
+      showToast('未检测到可用音频文件', 'warning')
+      return
+    }
+    const items: SoundboardEditorItem[] = []
+    for (const audioPath of audioPaths) {
+      const durationMs = await readSoundboardAudioDurationMs(audioPath)
+      items.push({
+        id: nowId(),
+        title: soundboardFileTitle(audioPath),
+        wakeWord: '',
+        audioPath,
+        durationMs,
+        trimStartMs: 0,
+        trimEndMs: durationMs,
+      })
+    }
+    updateSoundboardConfig((prev) => {
+      const groups = prev.groups.map((group) =>
+        group.id === prev.selectedGroupId ? { ...group, items: [...group.items, ...items] } : group,
+      )
+      return { ...prev, groups }
+    })
+    showToast(`已添加 ${items.length} 个音效`, 'success')
+  }
+
+  const pickSoundboardAudioFiles = async () => {
+    const files = await window.dialogs?.openFiles({
+      title: '添加音效音频',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Audio', extensions: SOUNDBOARD_AUDIO_EXTENSIONS },
+        { name: 'All', extensions: ['*'] },
+      ],
+    })
+    if (files?.length) {
+      await addSoundboardAudioPaths(files)
+    }
+  }
+
+  const handleSoundboardAudioDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setSoundboardDragActive(false)
+    const paths = extractDroppedPaths(event)
+    if (paths.length) {
+      void addSoundboardAudioPaths(paths)
+      return
+    }
+    getFilesFromDataTransfer(event).then(async (files) => {
+      if (!files.length) {
+        showToast('未检测到可用音频文件', 'warning')
+        return
+      }
+      const nativePaths = files.map((file) => getNativeFilePath(file)).filter(Boolean) as string[]
+      if (nativePaths.length) {
+        await addSoundboardAudioPaths(nativePaths)
+        return
+      }
+      const saved = await saveDroppedFiles(files)
+      await addSoundboardAudioPaths(saved)
+    })
+  }
+
+  const addSoundboardGroup = () => {
+    const id = nowId()
+    updateSoundboardConfig((prev) => ({
+      ...prev,
+      selectedGroupId: id,
+      groups: [
+        ...prev.groups,
+        {
+          id,
+          title: '新分组',
+          icon: 'music_note',
+          keywordWakeEnabled: true,
+          items: [],
+        },
+      ],
+    }))
+    setSoundboardSelectedItemIds([])
+  }
+
+  const updateSoundboardSelectedGroup = (patch: Partial<SoundboardEditorGroup>) => {
+    updateSoundboardConfig((prev) => ({
+      ...prev,
+      groups: prev.groups.map((group) => (group.id === prev.selectedGroupId ? { ...group, ...patch } : group)),
+    }))
+  }
+
+  const removeSoundboardSelectedGroup = () => {
+    if (soundboardConfig.groups.length <= 1) {
+      showToast('至少保留一个分组', 'warning')
+      return
+    }
+    updateSoundboardConfig((prev) => {
+      const index = prev.groups.findIndex((group) => group.id === prev.selectedGroupId)
+      const groups = prev.groups.filter((group) => group.id !== prev.selectedGroupId)
+      return {
+        ...prev,
+        groups,
+        selectedGroupId: groups[Math.min(Math.max(index, 0), groups.length - 1)]?.id ?? groups[0]?.id ?? 1,
+      }
+    })
+    setSoundboardSelectedItemIds([])
+  }
+
+  const moveSoundboardSelectedGroup = (direction: -1 | 1) => {
+    updateSoundboardConfig((prev) => {
+      const index = prev.groups.findIndex((group) => group.id === prev.selectedGroupId)
+      const target = index + direction
+      if (index < 0 || target < 0 || target >= prev.groups.length) return prev
+      const groups = [...prev.groups]
+      const [moved] = groups.splice(index, 1)
+      groups.splice(target, 0, moved)
+      return { ...prev, groups }
+    })
+  }
+
+  const updateSoundboardItem = (itemId: number, patch: Partial<SoundboardEditorItem>) => {
+    updateSoundboardConfig((prev) => ({
+      ...prev,
+      groups: prev.groups.map((group) =>
+        group.id === prev.selectedGroupId
+          ? { ...group, items: group.items.map((item) => (item.id === itemId ? { ...item, ...patch } : item)) }
+          : group,
+      ),
+    }))
+  }
+
+  const removeSoundboardItems = (itemIds: number[]) => {
+    if (!itemIds.length) return
+    const removeSet = new Set(itemIds)
+    updateSoundboardConfig((prev) => ({
+      ...prev,
+      groups: prev.groups.map((group) =>
+        group.id === prev.selectedGroupId ? { ...group, items: group.items.filter((item) => !removeSet.has(item.id)) } : group,
+      ),
+    }))
+    setSoundboardSelectedItemIds((prev) => prev.filter((id) => !removeSet.has(id)))
+    if (soundboardPreviewItemId && removeSet.has(soundboardPreviewItemId)) {
+      setSoundboardPreviewItemId(null)
+    }
+  }
+
+  const toggleSoundboardItemSelection = (itemId: number, selected?: boolean) => {
+    setSoundboardSelectedItemIds((prev) => {
+      const exists = prev.includes(itemId)
+      const shouldSelect = selected ?? !exists
+      if (shouldSelect && !exists) return [...prev, itemId]
+      if (!shouldSelect && exists) return prev.filter((id) => id !== itemId)
+      return prev
+    })
+  }
+
+  const selectAllSoundboardItems = () => {
+    setSoundboardSelectedItemIds(soundboardSelectedGroup?.items.map((item) => item.id) ?? [])
+  }
+
+  const setActiveSoundboardItemDrag = (next: SoundboardItemDragState | null) => {
+    soundboardItemDragRef.current = next
+    setSoundboardItemDrag(next)
+  }
+
+  const getSoundboardDraggedRow = (itemId: number) =>
+    soundboardItemListRef.current?.querySelector<HTMLElement>(`[data-soundboard-item-id="${itemId}"]`) ?? null
+
+  const clearSoundboardDraggedRowStyle = (itemId: number) => {
+    const row = getSoundboardDraggedRow(itemId)
+    if (!row) return
+    row.style.transform = ''
+    row.style.transition = ''
+  }
+
+  soundboardClearDraggedRowStyleRef.current = clearSoundboardDraggedRowStyle
+
+  const stopSoundboardAutoScroll = () => {
+    soundboardDragAutoScrollSpeedRef.current = 0
+    if (soundboardDragAutoScrollFrameRef.current) {
+      window.cancelAnimationFrame(soundboardDragAutoScrollFrameRef.current)
+      soundboardDragAutoScrollFrameRef.current = 0
+    }
+  }
+
+  const applySoundboardDragPosition = (clientY: number) => {
+    const drag = soundboardItemDragRef.current
+    if (!drag) return
+    const row = getSoundboardDraggedRow(drag.itemId)
+    if (row) {
+      row.style.transform = `translate3d(0, ${clientY - drag.startY}px, 0) scale(1.006)`
+      row.style.transition = 'none'
+    }
+    const scrollTop = soundboardItemScrollRef.current?.scrollTop ?? drag.startScrollTop
+    const scrollDelta = scrollTop - drag.startScrollTop
+    const draggedCenter = clientY - drag.pointerOffsetY + drag.rowHeight / 2
+    const nextTarget = drag.rowCenters.findIndex((center) => draggedCenter < center - scrollDelta)
+    const targetIndex = clampNumber(nextTarget < 0 ? drag.rowCenters.length - 1 : nextTarget, 0, drag.rowCenters.length - 1)
+    if (targetIndex !== drag.targetIndex) {
+      const next = { ...drag, targetIndex }
+      soundboardItemDragRef.current = next
+      setSoundboardItemDrag(next)
+    }
+  }
+
+  soundboardApplyDragPositionRef.current = applySoundboardDragPosition
+
+  const updateSoundboardAutoScroll = (clientY: number) => {
+    const scrollEl = soundboardItemScrollRef.current
+    if (!scrollEl) return
+    const rect = scrollEl.getBoundingClientRect()
+    const edge = 58
+    const maxSpeed = 18
+    let speed = 0
+    if (clientY < rect.top + edge) {
+      speed = -Math.ceil(((rect.top + edge - clientY) / edge) * maxSpeed)
+    } else if (clientY > rect.bottom - edge) {
+      speed = Math.ceil(((clientY - (rect.bottom - edge)) / edge) * maxSpeed)
+    }
+    soundboardDragAutoScrollSpeedRef.current = speed
+    if (!speed) {
+      if (soundboardDragAutoScrollFrameRef.current) {
+        window.cancelAnimationFrame(soundboardDragAutoScrollFrameRef.current)
+        soundboardDragAutoScrollFrameRef.current = 0
+      }
+      return
+    }
+    if (soundboardDragAutoScrollFrameRef.current) return
+    const tick = () => {
+      const currentDrag = soundboardItemDragRef.current
+      const currentScroll = soundboardItemScrollRef.current
+      const currentSpeed = soundboardDragAutoScrollSpeedRef.current
+      if (!currentDrag || !currentScroll || !currentSpeed) {
+        soundboardDragAutoScrollFrameRef.current = 0
+        return
+      }
+      currentScroll.scrollTop += currentSpeed
+      applySoundboardDragPosition(soundboardDragPointerYRef.current)
+      soundboardDragAutoScrollFrameRef.current = window.requestAnimationFrame(tick)
+    }
+    soundboardDragAutoScrollFrameRef.current = window.requestAnimationFrame(tick)
+  }
+
+  soundboardUpdateAutoScrollRef.current = updateSoundboardAutoScroll
+
+  const reorderSoundboardItemToIndex = (itemId: number, targetIndex: number) => {
+    updateSoundboardConfig((prev) => ({
+      ...prev,
+      groups: prev.groups.map((group) => {
+        if (group.id !== prev.selectedGroupId) return group
+        const items = [...group.items]
+        const from = items.findIndex((item) => item.id === itemId)
+        if (from < 0) return group
+        const boundedTarget = clampNumber(targetIndex, 0, items.length - 1)
+        if (from === boundedTarget) return group
+        const [moved] = items.splice(from, 1)
+        items.splice(boundedTarget, 0, moved)
+        return { ...group, items }
+      }),
+    }))
+  }
+
+  soundboardCommitDragRef.current = (drag: SoundboardItemDragState) => {
+    if (drag.originIndex !== drag.targetIndex) {
+      reorderSoundboardItemToIndex(drag.itemId, drag.targetIndex)
+    }
+  }
+
+  const startSoundboardItemDrag = (event: ReactPointerEvent<HTMLElement>, item: SoundboardEditorItem, index: number) => {
+    if (!soundboardSelectedGroup?.items.length) return
+    const row = event.currentTarget.closest<HTMLElement>('[data-soundboard-item-id]')
+    const container = soundboardItemListRef.current
+    if (!row || !container) return
+    const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-soundboard-item-id]'))
+    const originIndex = rows.findIndex((node) => Number(node.dataset.soundboardItemId) === item.id)
+    const rect = row.getBoundingClientRect()
+    const nextRow = rows[originIndex + 1]?.getBoundingClientRect()
+    const prevRow = rows[originIndex - 1]?.getBoundingClientRect()
+    const rowGap = Math.max(0, nextRow ? nextRow.top - rect.bottom : prevRow ? rect.top - prevRow.bottom : 8)
+    const rowCenters = rows.map((node) => {
+      const itemRect = node.getBoundingClientRect()
+      return itemRect.top + itemRect.height / 2
+    })
+    event.preventDefault()
+    event.stopPropagation()
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    soundboardDragPointerYRef.current = event.clientY
+    setActiveSoundboardItemDrag({
+      itemId: item.id,
+      pointerId: event.pointerId,
+      originIndex: originIndex >= 0 ? originIndex : index,
+      targetIndex: originIndex >= 0 ? originIndex : index,
+      startY: event.clientY,
+      pointerOffsetY: event.clientY - rect.top,
+      rowHeight: rect.height,
+      rowGap,
+      rowCenters,
+      startScrollTop: soundboardItemScrollRef.current?.scrollTop ?? 0,
+    })
+  }
+
+  const playSoundboardPreviewFromCurrentItem = () => {
+    const audio = soundboardItemAudioRef.current
+    if (!audio || !soundboardPreviewSrc) return
+    const startPlayback = () => {
+      try {
+        audio.currentTime = soundboardPreviewStartSec
+      } catch {
+        // Some formats do not allow seeking before metadata is fully ready.
+      }
+      void audio.play().catch(() => {
+        setSoundboardPreviewPlayback((prev) => ({ ...prev, playing: false }))
+      })
+    }
+    if (audio.readyState >= 1) {
+      startPlayback()
+    } else {
+      audio.addEventListener('loadedmetadata', startPlayback, { once: true })
+      audio.load()
+    }
+  }
+
+  soundboardPlayPreviewRef.current = playSoundboardPreviewFromCurrentItem
+
+  const clearSoundboardPreviewSelection = () => {
+    const audio = soundboardItemAudioRef.current
+    if (audio) {
+      audio.pause()
+      try {
+        audio.currentTime = 0
+      } catch {
+        // ignore
+      }
+    }
+    setSoundboardPreviewItemId(null)
+    setSoundboardPreviewPlayback((prev) => ({ ...prev, playing: false, currentTime: 0, duration: 0 }))
+  }
+
+  const toggleSoundboardPreviewItem = (itemId: number) => {
+    const sameItem = soundboardPreviewItemId === itemId
+    if (sameItem && soundboardPreviewPlayback.playing) {
+      stopSoundboardPreviewAudio()
+      return
+    }
+    if (!sameItem) {
+      setSoundboardPreviewPlayback((prev) => ({ ...prev, currentTime: 0, duration: 0, playing: false, requestId: prev.requestId + 1 }))
+      setSoundboardPreviewItemId(itemId)
+      return
+    }
+    setSoundboardPreviewPlayback((prev) => ({ ...prev, requestId: prev.requestId + 1 }))
+  }
+
+  const stopSoundboardPreviewAudio = () => {
+    const audio = soundboardItemAudioRef.current
+    if (!audio) return
+    audio.pause()
+    try {
+      audio.currentTime = soundboardPreviewStartSec
+    } catch {
+      // ignore
+    }
+    setSoundboardPreviewPlayback((prev) => ({ ...prev, currentTime: soundboardPreviewStartSec, playing: false }))
+  }
+
+  const applySoundboardBatchEdit = () => {
+    if (!soundboardSelectedItemIds.length) {
+      setSoundboardBatchEditOpen(false)
+      return
+    }
+    const selectedSet = new Set(soundboardSelectedItemIds)
+    const targetGroupId = Number(soundboardBatchEdit.targetGroupId)
+    updateSoundboardConfig((prev) => {
+      const editedItems: SoundboardEditorItem[] = []
+      const groupsWithoutMoved = prev.groups.map((group) => {
+        if (group.id !== prev.selectedGroupId) return group
+        const remaining: SoundboardEditorItem[] = []
+        group.items.forEach((item) => {
+          if (!selectedSet.has(item.id)) {
+            remaining.push(item)
+            return
+          }
+          const edited = {
+            ...item,
+            title: `${soundboardBatchEdit.titlePrefix}${item.title}${soundboardBatchEdit.titleSuffix}`.trim() || item.title,
+            wakeWord: soundboardBatchEdit.replaceWakeWord ? soundboardBatchEdit.wakeWord.trim() : item.wakeWord,
+          }
+          if (targetGroupId && targetGroupId !== prev.selectedGroupId && prev.groups.some((groupItem) => groupItem.id === targetGroupId)) {
+            editedItems.push(edited)
+          } else {
+            remaining.push(edited)
+          }
+        })
+        return { ...group, items: remaining }
+      })
+      const groups = editedItems.length
+        ? groupsWithoutMoved.map((group) =>
+            group.id === targetGroupId ? { ...group, items: [...group.items, ...editedItems] } : group,
+          )
+        : groupsWithoutMoved
+      return { ...prev, groups }
+    })
+    setSoundboardBatchEditOpen(false)
+    showToast('已批量修改选中音效', 'success')
+  }
+
+  const importSoundboardPackage = async () => {
+    const file = await window.dialogs?.openFile({
+      filters: [
+        { name: 'KIGTTS Soundboard Package', extensions: ['kigspk', 'zip'] },
+        { name: 'All', extensions: ['*'] },
+      ],
+    })
+    if (!file) return
+    if (!window.soundboardBridge?.importPackage) {
+      showToast('当前版本不支持导入音效包', 'error')
+      return
+    }
+    setSoundboardImporting(true)
+    try {
+      const result = await window.soundboardBridge.importPackage(file)
+      if (!result.ok || !result.config) {
+        throw new Error(result.message || '导入音效包失败')
+      }
+      setSoundboardConfig(normalizeSoundboardEditorConfig(result.config))
+      setSoundboardSelectedItemIds([])
+      showToast(result.message || '音效包已导入', 'success')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '导入音效包失败', 'error')
+    } finally {
+      setSoundboardImporting(false)
+    }
+  }
+
+  const exportSoundboardPackage = async () => {
+    if (!window.soundboardBridge?.exportPackage) {
+      showToast('当前版本不支持导出音效包', 'error')
+      return
+    }
+    const itemCount = soundboardConfig.groups.reduce((acc, group) => acc + group.items.length, 0)
+    if (!itemCount) {
+      showToast('请先添加音效音频', 'warning')
+      return
+    }
+    const savePath = await window.dialogs?.saveFile({
+      title: '导出音效包',
+      defaultPath: 'soundboard.kigspk',
+      filters: [
+        { name: 'KIGTTS Soundboard Package', extensions: ['kigspk'] },
+        { name: 'All', extensions: ['*'] },
+      ],
+    })
+    if (!savePath) return
+    setSoundboardExporting(true)
+    try {
+      const result = await window.soundboardBridge.exportPackage(soundboardConfig, savePath)
+      if (!result.ok) {
+        throw new Error(result.message || '导出音效包失败')
+      }
+      showToast(`音效包已导出：${result.path || savePath}`, 'success')
+      if (result.path) {
+        void window.paths?.openInExplorer?.(result.path)
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '导出音效包失败', 'error')
+    } finally {
+      setSoundboardExporting(false)
+    }
+  }
+
+  const resetSoundboardEditor = () => {
+    setSoundboardConfig(defaultSoundboardEditorConfig())
+    setSoundboardSelectedItemIds([])
+    setSoundboardPreviewItemId(null)
+    showToast('已新建空白音效包', 'info')
   }
 
   const send = (type: string, payload?: Record<string, unknown>) => {
@@ -3421,6 +4167,66 @@ function App() {
       // ignore
     }
   }, [voxcpmOpts])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SOUNDBOARD_EDITOR_STORAGE_KEY, JSON.stringify(soundboardConfig))
+    } catch {
+      // ignore
+    }
+  }, [soundboardConfig])
+
+  useEffect(() => {
+    if (!soundboardItemDragRef.current) return
+    const previousUserSelect = document.body.style.userSelect
+    document.body.style.userSelect = 'none'
+    const onPointerMove = (event: PointerEvent) => {
+      const drag = soundboardItemDragRef.current
+      if (!drag || event.pointerId !== drag.pointerId) return
+      event.preventDefault()
+      soundboardDragPointerYRef.current = event.clientY
+      soundboardApplyDragPositionRef.current(event.clientY)
+      soundboardUpdateAutoScrollRef.current(event.clientY)
+    }
+    const finish = (event: PointerEvent) => {
+      const drag = soundboardItemDragRef.current
+      if (!drag || event.pointerId !== drag.pointerId) return
+      event.preventDefault()
+      stopSoundboardAutoScroll()
+      soundboardClearDraggedRowStyleRef.current(drag.itemId)
+      soundboardItemDragRef.current = null
+      setSoundboardItemDrag(null)
+      soundboardCommitDragRef.current(drag)
+    }
+    window.addEventListener('pointermove', onPointerMove, { passive: false })
+    window.addEventListener('pointerup', finish, { passive: false })
+    window.addEventListener('pointercancel', finish, { passive: false })
+    return () => {
+      document.body.style.userSelect = previousUserSelect
+      stopSoundboardAutoScroll()
+      const drag = soundboardItemDragRef.current
+      if (drag) soundboardClearDraggedRowStyleRef.current(drag.itemId)
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+    }
+  }, [activeSoundboardDragSession])
+
+  useEffect(() => {
+    setSoundboardSelectedItemIds((prev) => {
+      if (!soundboardSelectedGroup) return []
+      const valid = new Set(soundboardSelectedGroup.items.map((item) => item.id))
+      return prev.filter((id) => valid.has(id))
+    })
+    if (soundboardPreviewItemId && !soundboardSelectedGroup?.items.some((item) => item.id === soundboardPreviewItemId)) {
+      clearSoundboardPreviewSelection()
+    }
+  }, [soundboardPreviewItemId, soundboardSelectedGroup])
+
+  useEffect(() => {
+    if (!soundboardPreviewPlayback.requestId || !soundboardPreviewSrcRef.current) return
+    soundboardPlayPreviewRef.current()
+  }, [soundboardPreviewPlayback.requestId])
 
   useEffect(() => {
     setDistillOpts((prev) => {
@@ -8017,6 +8823,532 @@ function App() {
     </Stack>
   )
 
+  const soundboardContent = (
+    <Stack spacing={2} sx={{ flex: 1, minHeight: 0, width: '100%', overflow: 'hidden' }}>
+      <Paper
+        sx={{
+          ...cardPaperSx,
+          borderColor: soundboardDragActive ? 'primary.main' : 'divider',
+          transition: 'border-color 120ms ease, background-color 120ms ease',
+        }}
+        onDragOver={(event) => {
+          event.preventDefault()
+          if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+          setSoundboardDragActive(true)
+        }}
+        onDragLeave={() => setSoundboardDragActive(false)}
+        onDrop={handleSoundboardAudioDrop}
+      >
+        <Stack spacing={1.5}>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ md: 'center' }}>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography variant="subtitle1" fontWeight={600}>
+                音效包编辑
+              </Typography>
+              <Typography variant="body2" sx={{ opacity: 0.72 }}>
+                制作 KIGTTS 手机端可导入的音效包。可拖入多个音频、批量改名/唤醒词、拖动排序并导出 `.kigspk`。
+              </Typography>
+            </Box>
+            <Stack direction="row" spacing={1} flexWrap="wrap" justifyContent={{ xs: 'flex-start', md: 'flex-end' }} useFlexGap>
+              <Button
+                variant="outlined"
+                startIcon={<MsIcon name="upload_file" size={18} />}
+                onClick={pickSoundboardAudioFiles}
+              >
+                添加音频
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<MsIcon name="folder_open" size={18} />}
+                onClick={importSoundboardPackage}
+                disabled={soundboardImporting}
+              >
+                导入音效包
+              </Button>
+              <Button
+                variant="contained"
+                startIcon={<MsIcon name="archive" size={18} />}
+                onClick={exportSoundboardPackage}
+                disabled={soundboardExporting}
+              >
+                导出给手机端
+              </Button>
+            </Stack>
+          </Stack>
+          <Alert severity="info" icon={<MsIcon name="library_music" size={20} />}>
+            可直接从资源管理器把音频拖进这个页面；拖入多个文件时会按文件名自动创建音效条目。
+          </Alert>
+        </Stack>
+      </Paper>
+
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', lg: '320px minmax(0, 1fr)' },
+          gap: 2,
+          alignItems: 'stretch',
+          flex: 1,
+          minHeight: 0,
+          overflow: { xs: 'auto', lg: 'hidden' },
+        }}
+      >
+        <Stack spacing={2} sx={{ minHeight: 0, overflow: { lg: 'auto' }, pr: { lg: 0.5 }, pb: 0.5 }}>
+          <Paper sx={cardPaperSx}>
+            <Stack spacing={1.5}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between">
+                <Typography variant="subtitle1" fontWeight={600}>
+                  分组
+                </Typography>
+                <Button size="small" variant="text" startIcon={<MsIcon name="add" size={17} />} onClick={addSoundboardGroup}>
+                  新增
+                </Button>
+              </Stack>
+              <Stack spacing={0.5}>
+                {soundboardConfig.groups.map((group) => {
+                  const selected = group.id === soundboardConfig.selectedGroupId
+                  return (
+                    <ListItemButton
+                      key={group.id}
+                      selected={selected}
+                      onClick={() => {
+                        if (group.id === soundboardConfig.selectedGroupId) return
+                        clearSoundboardPreviewSelection()
+                        setSoundboardConfig((prev) => ({ ...prev, selectedGroupId: group.id }))
+                        setSoundboardSelectedItemIds([])
+                      }}
+                      sx={{ borderRadius: 1, px: 1 }}
+                    >
+                      <ListItemIcon sx={{ minWidth: 34 }}>
+                        <MsIcon name={group.icon || 'music_note'} size={20} />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={group.title || '未命名分组'}
+                        secondary={`${group.items.length} 个音效${group.keywordWakeEnabled ? ' · 参与关键词触发' : ''}`}
+                        primaryTypographyProps={{ noWrap: true }}
+                        secondaryTypographyProps={{ noWrap: true }}
+                      />
+                    </ListItemButton>
+                  )
+                })}
+              </Stack>
+            </Stack>
+          </Paper>
+
+          <Paper sx={cardPaperSx}>
+            <Stack spacing={1.5}>
+              <Typography variant="subtitle1" fontWeight={600}>
+                分组设置
+              </Typography>
+              <TextField
+                label="分组名称"
+                value={soundboardSelectedGroup?.title ?? ''}
+                onChange={(event) => updateSoundboardSelectedGroup({ title: event.target.value })}
+                size="small"
+                fullWidth
+              />
+              <FormControl size="small" fullWidth>
+                <InputLabel>图标</InputLabel>
+                <Select
+                  value={soundboardSelectedGroup?.icon ?? 'music_note'}
+                  label="图标"
+                  onChange={(event) => updateSoundboardSelectedGroup({ icon: event.target.value })}
+                >
+                  {SOUNDBOARD_GROUP_ICONS.map((icon) => (
+                    <MenuItem key={icon} value={icon}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <MsIcon name={icon} size={18} />
+                        <span>{icon}</span>
+                      </Stack>
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={soundboardSelectedGroup?.keywordWakeEnabled !== false}
+                    onChange={(event) => updateSoundboardSelectedGroup({ keywordWakeEnabled: event.target.checked })}
+                  />
+                }
+                label="参与关键词触发"
+              />
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <Button
+                  variant="outlined"
+                  startIcon={<MsIcon name="arrow_upward" size={17} />}
+                  onClick={() => moveSoundboardSelectedGroup(-1)}
+                  disabled={soundboardSelectedGroupIndex <= 0}
+                >
+                  上移
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<MsIcon name="arrow_downward" size={17} />}
+                  onClick={() => moveSoundboardSelectedGroup(1)}
+                  disabled={soundboardSelectedGroupIndex >= soundboardConfig.groups.length - 1}
+                >
+                  下移
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  startIcon={<MsIcon name="delete" size={17} />}
+                  onClick={removeSoundboardSelectedGroup}
+                  disabled={soundboardConfig.groups.length <= 1}
+                >
+                  删除
+                </Button>
+              </Stack>
+            </Stack>
+          </Paper>
+
+          <Paper sx={cardPaperSx}>
+            <Stack spacing={1.5}>
+              <Typography variant="subtitle1" fontWeight={600}>
+                手机端布局默认值
+              </Typography>
+              <FormControl size="small" fullWidth>
+                <InputLabel>竖屏布局</InputLabel>
+                <Select
+                  value={soundboardConfig.portraitLayout}
+                  label="竖屏布局"
+                  onChange={(event) =>
+                    updateSoundboardConfig((prev) => ({
+                      ...prev,
+                      portraitLayout: event.target.value as SoundboardLayoutValue,
+                    }))
+                  }
+                >
+                  {SOUNDBOARD_LAYOUT_OPTIONS.filter((item) => !['grid_7', 'grid_8'].includes(item.value)).map((item) => (
+                    <MenuItem key={item.value} value={item.value}>
+                      {item.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel>横屏布局</InputLabel>
+                <Select
+                  value={soundboardConfig.landscapeLayout}
+                  label="横屏布局"
+                  onChange={(event) =>
+                    updateSoundboardConfig((prev) => ({
+                      ...prev,
+                      landscapeLayout: event.target.value as SoundboardLayoutValue,
+                    }))
+                  }
+                >
+                  {SOUNDBOARD_LAYOUT_OPTIONS.map((item) => (
+                    <MenuItem key={item.value} value={item.value}>
+                      {item.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Button variant="text" color="inherit" startIcon={<MsIcon name="restart_alt" size={17} />} onClick={resetSoundboardEditor}>
+                新建空白音效包
+              </Button>
+            </Stack>
+          </Paper>
+        </Stack>
+
+        <Stack spacing={2} sx={{ minHeight: 0, height: '100%' }}>
+          <Paper sx={{ ...cardPaperSx, minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column' }}>
+            <Stack spacing={1.5} sx={{ minHeight: 0, flex: 1 }}>
+              <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }}>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="subtitle1" fontWeight={600}>
+                    {soundboardSelectedGroup?.title || '音效条目'}
+                  </Typography>
+                  <Typography variant="body2" sx={{ opacity: 0.72 }}>
+                    {soundboardSelectedGroup?.items.length ?? 0} 个音效，已选 {soundboardSelectedItemIds.length} 个。拖动左侧手柄可以排序。
+                  </Typography>
+                </Box>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  <Button size="small" variant="text" onClick={selectAllSoundboardItems} disabled={!soundboardSelectedGroup?.items.length}>
+                    全选
+                  </Button>
+                  <Button size="small" variant="text" onClick={() => setSoundboardSelectedItemIds([])} disabled={!soundboardSelectedItemIds.length}>
+                    取消选择
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<MsIcon name="edit" size={17} />}
+                    onClick={() => {
+                      setSoundboardBatchEdit({
+                        titlePrefix: '',
+                        titleSuffix: '',
+                        wakeWord: '',
+                        replaceWakeWord: false,
+                        targetGroupId: '',
+                      })
+                      setSoundboardBatchEditOpen(true)
+                    }}
+                    disabled={!soundboardSelectedItemIds.length}
+                  >
+                    批量修改
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="error"
+                    startIcon={<MsIcon name="delete" size={17} />}
+                    onClick={() => removeSoundboardItems(soundboardSelectedItemIds)}
+                    disabled={!soundboardSelectedItemIds.length}
+                  >
+                    删除选中
+                  </Button>
+                </Stack>
+              </Stack>
+
+              <Box
+                ref={soundboardItemScrollRef}
+                onDragOver={(event) => {
+                  event.preventDefault()
+                  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+                }}
+                onDrop={handleSoundboardAudioDrop}
+                sx={{
+                  flex: 1,
+                  minHeight: { xs: 360, lg: 0 },
+                  overflow: 'auto',
+                  pr: 0.5,
+                }}
+              >
+                {!soundboardSelectedGroup?.items.length ? (
+                  <Box
+                    sx={{
+                      minHeight: 320,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      py: 6,
+                      px: 2,
+                      textAlign: 'center',
+                      color: 'text.secondary',
+                      bgcolor: 'action.hover',
+                    }}
+                  >
+                    <MsIcon name="audio_file" size={34} />
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      点击“添加音频”，或把多个音频文件直接拖入这里。
+                    </Typography>
+                  </Box>
+                ) : (
+                <Stack ref={soundboardItemListRef} spacing={1} sx={{ position: 'relative', pb: 0.5 }}>
+                  {soundboardSelectedGroup.items.map((item, itemIndex) => {
+                    const selected = soundboardSelectedItemIds.includes(item.id)
+                    const previewing = soundboardPreviewItem?.id === item.id
+                    const previewProgress = previewing ? soundboardPreviewProgress : 0
+                    const draggingThis = soundboardItemDrag?.itemId === item.id
+                    const dragOrigin = soundboardItemDrag?.originIndex ?? -1
+                    const dragTarget = soundboardItemDrag?.targetIndex ?? dragOrigin
+                    const dragShift = (soundboardItemDrag?.rowHeight ?? 0) + (soundboardItemDrag?.rowGap ?? 0)
+                    const avoidOffset =
+                      soundboardItemDrag && !draggingThis
+                        ? dragOrigin < dragTarget && itemIndex > dragOrigin && itemIndex <= dragTarget
+                          ? -dragShift
+                          : dragOrigin > dragTarget && itemIndex >= dragTarget && itemIndex < dragOrigin
+                            ? dragShift
+                            : 0
+                        : 0
+                    return (
+                      <Paper
+                        key={item.id}
+                        data-soundboard-item-id={item.id}
+                        elevation={0}
+                        sx={{
+                          p: 1,
+                          position: 'relative',
+                          zIndex: draggingThis ? 3 : 1,
+                          overflow: 'hidden',
+                          borderRadius: 1,
+                          border: '1px solid',
+                          borderColor: 'divider',
+                          bgcolor: 'background.paper',
+                          boxShadow: draggingThis ? '0 8px 22px rgba(0,0,0,0.22)' : 'none',
+                          transform: draggingThis
+                            ? 'translate3d(0, 0, 0) scale(1.006)'
+                            : avoidOffset
+                              ? `translate3d(0, ${avoidOffset}px, 0)`
+                              : 'translate3d(0, 0, 0)',
+                          transition: draggingThis
+                            ? 'box-shadow 120ms ease'
+                            : 'transform 160ms cubic-bezier(0.2, 0, 0, 1), background-color 120ms ease',
+                          willChange: draggingThis || avoidOffset ? 'transform' : 'auto',
+                          contentVisibility: soundboardItemDrag ? 'visible' : 'auto',
+                          containIntrinsicSize: '96px',
+                          cursor: draggingThis ? 'grabbing' : 'default',
+                          '&:hover': {
+                            bgcolor: 'action.hover',
+                          },
+                        }}
+                      >
+                        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }}>
+                          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
+                            <Tooltip title="拖动排序" arrow>
+                              <Box
+                                onPointerDown={(event) => startSoundboardItemDrag(event, item, itemIndex)}
+                                sx={{
+                                  width: 34,
+                                  height: 34,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  borderRadius: '50%',
+                                  cursor: draggingThis ? 'grabbing' : 'grab',
+                                  color: draggingThis ? 'primary.main' : 'text.secondary',
+                                  touchAction: 'none',
+                                  '&:hover': { bgcolor: 'action.selected' },
+                                }}
+                              >
+                                <MsIcon name="drag_indicator" size={22} />
+                              </Box>
+                            </Tooltip>
+                            <Checkbox
+                              size="small"
+                              checked={selected}
+                              onChange={(event) => toggleSoundboardItemSelection(item.id, event.target.checked)}
+                            />
+                            <Box sx={{ minWidth: 0, flex: 1 }}>
+                              <TextField
+                                value={item.title}
+                                label="名称"
+                                size="small"
+                                fullWidth
+                                onChange={(event) => updateSoundboardItem(item.id, { title: event.target.value })}
+                              />
+                            </Box>
+                            <Box sx={{ width: { xs: 150, md: 180 } }}>
+                              <TextField
+                                value={item.wakeWord}
+                                label="唤醒词"
+                                size="small"
+                                fullWidth
+                                onChange={(event) => updateSoundboardItem(item.id, { wakeWord: event.target.value })}
+                              />
+                            </Box>
+                          </Stack>
+                          <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end">
+                            <Chip size="small" label={formatDurationMsForSoundboard(item.durationMs)} variant="outlined" />
+                            <Tooltip title={previewing ? (soundboardPreviewPlayback.playing ? '停止试听' : '播放当前试听') : '播放试听'} arrow>
+                              <IconButton size="small" onClick={() => toggleSoundboardPreviewItem(item.id)} disabled={!item.audioPath}>
+                                <MsIcon name={previewing && soundboardPreviewPlayback.playing ? 'stop' : 'play_arrow'} size={19} />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="删除" arrow>
+                              <IconButton size="small" color="error" onClick={() => removeSoundboardItems([item.id])}>
+                                <MsIcon name="delete" size={19} />
+                              </IconButton>
+                            </Tooltip>
+                          </Stack>
+                        </Stack>
+                        <Stack
+                          direction={{ xs: 'column', md: 'row' }}
+                          spacing={1}
+                          alignItems={{ md: 'center' }}
+                          sx={{ mt: 0.75 }}
+                        >
+                          <Typography variant="caption" sx={{ flex: 1, minWidth: 0, opacity: 0.7, wordBreak: 'break-all' }}>
+                            {item.audioPath || '未绑定音频'}
+                          </Typography>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <TextField
+                              label="起始秒"
+                              size="small"
+                              type="number"
+                              value={Math.max(0, item.trimStartMs / 1000)}
+                              onChange={(event) => {
+                                const next = Math.max(0, Number(event.target.value) || 0) * 1000
+                                updateSoundboardItem(item.id, {
+                                  trimStartMs: Math.min(next, item.trimEndMs || item.durationMs || next),
+                                })
+                              }}
+                              inputProps={{ min: 0, step: 0.1 }}
+                              sx={{ width: 96 }}
+                            />
+                            <TextField
+                              label="结束秒"
+                              size="small"
+                              type="number"
+                              value={Math.max(0, (item.trimEndMs || item.durationMs || 0) / 1000)}
+                              onChange={(event) => {
+                                const next = Math.max(0, Number(event.target.value) || 0) * 1000
+                                updateSoundboardItem(item.id, {
+                                  trimEndMs: item.durationMs ? Math.min(Math.max(next, item.trimStartMs), item.durationMs) : Math.max(next, item.trimStartMs),
+                                })
+                              }}
+                              inputProps={{ min: 0, step: 0.1 }}
+                              sx={{ width: 96 }}
+                            />
+                          </Stack>
+                        </Stack>
+                        <LinearProgress
+                          variant="determinate"
+                          value={previewProgress}
+                          sx={{
+                            mt: 1,
+                            height: 3,
+                            borderRadius: 999,
+                            bgcolor: 'action.hover',
+                            '& .MuiLinearProgress-bar': {
+                              transition: soundboardPreviewPlayback.playing ? 'transform 90ms linear' : 'transform 140ms ease',
+                            },
+                          }}
+                        />
+                      </Paper>
+                    )
+                  })}
+                  </Stack>
+                )}
+              </Box>
+              <Box
+                component="audio"
+                key={soundboardPreviewSrc || 'empty-soundboard-audio'}
+                ref={soundboardItemAudioRef}
+                src={soundboardPreviewSrc}
+                preload="metadata"
+                onLoadStart={() => {
+                  setSoundboardPreviewPlayback((prev) => ({ ...prev, playing: false, currentTime: 0, duration: 0 }))
+                }}
+                onLoadedMetadata={(event: SyntheticEvent<HTMLAudioElement>) => {
+                  const audio = event.currentTarget
+                  const duration = Number.isFinite(audio.duration) ? audio.duration : 0
+                  const start = Math.max(0, (soundboardPreviewItem?.trimStartMs ?? 0) / 1000)
+                  setSoundboardPreviewPlayback((prev) => ({ ...prev, duration, currentTime: start }))
+                }}
+                onDurationChange={(event: SyntheticEvent<HTMLAudioElement>) => {
+                  const audio = event.currentTarget
+                  setSoundboardPreviewPlayback((prev) => ({ ...prev, duration: Number.isFinite(audio.duration) ? audio.duration : 0 }))
+                }}
+                onTimeUpdate={(event: SyntheticEvent<HTMLAudioElement>) => {
+                  const audio = event.currentTarget
+                  if (soundboardPreviewItem && soundboardPreviewEndSec > soundboardPreviewStartSec && audio.currentTime >= soundboardPreviewEndSec - 0.02) {
+                    audio.pause()
+                    audio.currentTime = soundboardPreviewStartSec
+                    setSoundboardPreviewPlayback((prev) => ({ ...prev, playing: false, currentTime: soundboardPreviewStartSec }))
+                    return
+                  }
+                  setSoundboardPreviewPlayback((prev) => ({ ...prev, currentTime: audio.currentTime || soundboardPreviewStartSec }))
+                }}
+                onPlay={() => setSoundboardPreviewPlayback((prev) => ({ ...prev, playing: true }))}
+                onPause={() => setSoundboardPreviewPlayback((prev) => ({ ...prev, playing: false }))}
+                onEnded={(event: SyntheticEvent<HTMLAudioElement>) => {
+                  const audio = event.currentTarget
+                  audio.currentTime = soundboardPreviewStartSec
+                  setSoundboardPreviewPlayback((prev) => ({ ...prev, playing: false, currentTime: soundboardPreviewStartSec }))
+                }}
+                sx={{ display: 'none' }}
+              />
+            </Stack>
+          </Paper>
+        </Stack>
+      </Box>
+    </Stack>
+  )
+
   const logsContent = (
     <Paper sx={{ ...cardPaperSx, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between">
@@ -8248,13 +9580,16 @@ function App() {
     if (currentPage === 'prep') return prepContent
     if (currentPage === 'settings') return settingsContent
     if (currentPage === 'preview') return previewContent
+    if (currentPage === 'soundboard') return soundboardContent
     if (currentPage === 'about') return aboutContent
     return logsContent
   }
 
   const pageBody =
-    displayPage === 'logs' ? (
-      <Box sx={{ flex: 1, minHeight: 0, px: 0.75, pb: 2, display: 'flex', overflow: 'hidden' }}>{logsContent}</Box>
+    displayPage === 'logs' || displayPage === 'soundboard' ? (
+      <Box sx={{ flex: 1, minHeight: 0, px: 0.75, pb: 2, display: 'flex', overflow: 'hidden' }}>
+        {displayPage === 'logs' ? logsContent : soundboardContent}
+      </Box>
     ) : (
       <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.75, pb: 2 }}>
         {renderContent(displayPage)}
@@ -9293,6 +10628,77 @@ function App() {
               startIcon={distillPresetBusy ? <CircularProgress size={16} color="inherit" /> : <MsIcon name="library_add" size={18} />}
             >
               添加到文本来源
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        <Dialog
+          open={soundboardBatchEditOpen}
+          onClose={() => setSoundboardBatchEditOpen(false)}
+          maxWidth="sm"
+          fullWidth
+        >
+          <DialogTitle>批量修改音效</DialogTitle>
+          <DialogContent dividers>
+            <Stack spacing={2}>
+              <Typography variant="body2" sx={{ opacity: 0.78 }}>
+                当前选中 {soundboardSelectedItemIds.length} 个音效。可统一追加名称前后缀、替换唤醒词，或移动到其它分组。
+              </Typography>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                <TextField
+                  label="名称前缀"
+                  value={soundboardBatchEdit.titlePrefix}
+                  onChange={(event) => setSoundboardBatchEdit((prev) => ({ ...prev, titlePrefix: event.target.value }))}
+                  fullWidth
+                  size="small"
+                />
+                <TextField
+                  label="名称后缀"
+                  value={soundboardBatchEdit.titleSuffix}
+                  onChange={(event) => setSoundboardBatchEdit((prev) => ({ ...prev, titleSuffix: event.target.value }))}
+                  fullWidth
+                  size="small"
+                />
+              </Stack>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={soundboardBatchEdit.replaceWakeWord}
+                    onChange={(event) => setSoundboardBatchEdit((prev) => ({ ...prev, replaceWakeWord: event.target.checked }))}
+                  />
+                }
+                label="统一替换唤醒词"
+              />
+              <TextField
+                label="唤醒词"
+                value={soundboardBatchEdit.wakeWord}
+                onChange={(event) => setSoundboardBatchEdit((prev) => ({ ...prev, wakeWord: event.target.value }))}
+                fullWidth
+                size="small"
+                disabled={!soundboardBatchEdit.replaceWakeWord}
+                helperText="开启后会覆盖选中音效原有唤醒词；留空则批量清空。"
+              />
+              <FormControl size="small" fullWidth>
+                <InputLabel>移动到分组</InputLabel>
+                <Select
+                  value={soundboardBatchEdit.targetGroupId}
+                  label="移动到分组"
+                  onChange={(event) => setSoundboardBatchEdit((prev) => ({ ...prev, targetGroupId: String(event.target.value) }))}
+                >
+                  <MenuItem value="">不移动</MenuItem>
+                  {soundboardConfig.groups.map((group) => (
+                    <MenuItem key={group.id} value={String(group.id)}>
+                      {group.title || '未命名分组'}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Stack>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 2 }}>
+            <Button onClick={() => setSoundboardBatchEditOpen(false)}>取消</Button>
+            <Button variant="contained" startIcon={<MsIcon name="done" size={18} />} onClick={applySoundboardBatchEdit}>
+              应用修改
             </Button>
           </DialogActions>
         </Dialog>
