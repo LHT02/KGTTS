@@ -1797,7 +1797,7 @@ class RealtimeController(
     private var recorder: AudioRecord? = null
     private var loopJob: Job? = null
     private var asr: AsrModule? = null
-    private var tts: TtsModule? = null
+    @Volatile private var tts: TtsModule? = null
     private val player = AudioPlayer(context)
     private val sampleRate = 16000
     private val queueLock = Any()
@@ -1855,7 +1855,7 @@ class RealtimeController(
     private var aec3: Aec3Processor? = null
     private var currentAsrDir: File? = null
     private var currentSileroVadModelFile: File? = null
-    private var currentVoiceDir: File? = null
+    @Volatile private var currentVoiceDir: File? = null
     private var lastLevelReportMs: Long = 0L
     private val recorderMutex = Mutex()
     private var rnnoiseProcessor: RnNoiseProcessor? = null
@@ -2602,6 +2602,30 @@ class RealtimeController(
         return id
     }
 
+    fun isTtsReadyFor(voiceDir: File): Boolean {
+        val loadedTts = tts ?: return false
+        val loadedDir = currentVoiceDir ?: return false
+        return loadedTts.sampleRate > 0 && loadedDir.absolutePath == voiceDir.absolutePath
+    }
+
+    fun enqueueSpeakTextPendingTts(text: String, interruptCurrent: Boolean = false): Long? {
+        val normalized = text.trim()
+        if (normalized.isEmpty()) return null
+        if (interruptCurrent) {
+            ttsPlaybackGeneration.incrementAndGet()
+            val activeJob = ttsJob
+            ttsJob = null
+            synchronized(queueLock) {
+                ttsQueue.clear()
+            }
+            runCatching { player.stop() }
+            activeJob?.cancel()
+        }
+        val id = enqueueTts(normalized)
+        notifyResult(id, normalized)
+        return id
+    }
+
     private suspend fun stopTtsPlaybackLocked(clearQueue: Boolean) {
         ttsPlaybackGeneration.incrementAndGet()
         val activeJob = ttsJob
@@ -2712,8 +2736,8 @@ class RealtimeController(
         return recorderMutex.withLock {
             try {
                 if (tts == null || currentVoiceDir?.absolutePath != voiceDir.absolutePath) {
-                    stopTtsPlaybackLocked(clearQueue = true)
                     val previousTts = tts
+                    stopTtsPlaybackLocked(clearQueue = previousTts != null)
                     val nextTts = moduleFactory.createTts(context, voiceDir)
                     applyTtsSynthesisTuning(nextTts)
                     tts = nextTts
@@ -2724,6 +2748,9 @@ class RealtimeController(
                         aec3?.release()
                         aec3 = null
                         ensureAec3()
+                    }
+                    if (synchronized(queueLock) { ttsQueue.isNotEmpty() }) {
+                        ensureTtsLoop()
                     }
                 }
             } catch (e: Throwable) {

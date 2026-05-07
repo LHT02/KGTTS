@@ -258,6 +258,8 @@ class FloatingOverlayService : Service() {
     private var miniSoundboardEmptyTextView: TextView? = null
     private var miniSoundboardTabsCardView: LinearLayout? = null
     private var miniSoundboardTabsContainer: LinearLayout? = null
+    private var miniSoundboardTabsScrollHost: View? = null
+    private var miniSoundboardTabsVerticalLayout: Boolean? = null
     private var miniSoundboardLayoutButtonView: TextView? = null
     private var miniActionFab: FrameLayout? = null
     private var miniActionFabIconView: TextView? = null
@@ -3656,6 +3658,8 @@ class FloatingOverlayService : Service() {
         miniSoundboardEmptyTextView = null
         miniSoundboardTabsCardView = null
         miniSoundboardTabsContainer = null
+        miniSoundboardTabsScrollHost = null
+        miniSoundboardTabsVerticalLayout = null
         miniSoundboardLayoutButtonView = null
         miniPreviewOverlay = null
         miniPreviewHost = null
@@ -5986,12 +5990,7 @@ class FloatingOverlayService : Service() {
         val selected = ensureMiniSoundboardSelectedGroup()
         val items = selected?.items.orEmpty()
         val layout = currentMiniSoundboardLayout()
-        recycler.layoutManager =
-            if (layout == SoundboardLayoutMode.List) {
-                LinearLayoutManager(this, RecyclerView.VERTICAL, false)
-            } else {
-                GridLayoutManager(this, layout.columns.coerceIn(2, 2))
-            }
+        ensureMiniSoundboardLayoutManager(recycler, layout)
         adapter.submit(items, soundboardPlaybackStates, layout)
         miniSoundboardEmptyTextView?.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
         miniSoundboardLayoutButtonView?.apply {
@@ -6007,12 +6006,39 @@ class FloatingOverlayService : Service() {
         body.requestLayout()
     }
 
+    private fun ensureMiniSoundboardLayoutManager(
+        recycler: RecyclerView,
+        layout: SoundboardLayoutMode
+    ) {
+        val current = recycler.layoutManager
+        val matches =
+            if (layout == SoundboardLayoutMode.List) {
+                current is LinearLayoutManager &&
+                    current !is GridLayoutManager &&
+                    current.orientation == RecyclerView.VERTICAL
+            } else {
+                current is GridLayoutManager &&
+                    current.orientation == RecyclerView.VERTICAL &&
+                    current.spanCount == layout.columns.coerceIn(2, 2)
+            }
+        if (matches) return
+        recycler.layoutManager =
+            if (layout == SoundboardLayoutMode.List) {
+                LinearLayoutManager(this, RecyclerView.VERTICAL, false)
+            } else {
+                GridLayoutManager(this, layout.columns.coerceIn(2, 2))
+            }
+    }
+
     private fun refreshMiniSoundboardPlaybackUi() {
         miniSoundboardAdapter?.updatePlaybackStates(soundboardPlaybackStates)
     }
 
     private fun refreshMiniSoundboardTabs() {
         val container = miniSoundboardTabsContainer ?: return
+        val scrollHost = miniSoundboardTabsScrollHost
+        val savedScrollX = scrollHost?.scrollX ?: 0
+        val savedScrollY = scrollHost?.scrollY ?: 0
         container.removeAllViews()
         val groups = soundboardConfig.groups.ifEmpty { defaultSoundboardGroups() }
         val verticalTabs = isPhoneLandscapeUi()
@@ -6069,6 +6095,13 @@ class FloatingOverlayService : Service() {
                 }
             )
         }
+        scrollHost?.post {
+            if (verticalTabs) {
+                scrollHost.scrollTo(0, savedScrollY)
+            } else {
+                scrollHost.scrollTo(savedScrollX, 0)
+            }
+        }
     }
 
     private fun refreshMiniSoundboardLayoutMetrics() {
@@ -6117,9 +6150,21 @@ class FloatingOverlayService : Service() {
         val tabsCard = miniSoundboardTabsCardView ?: return
         val tabsContainer = miniSoundboardTabsContainer ?: return
         val layoutButton = miniSoundboardLayoutButtonView ?: return
+        if (
+            miniSoundboardTabsVerticalLayout == vertical &&
+            tabsCard.childCount > 0 &&
+            tabsContainer.parent != null &&
+            layoutButton.parent != null
+        ) {
+            tabsCard.orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            tabsContainer.orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            return
+        }
         tabsCard.removeAllViews()
         (tabsContainer.parent as? ViewGroup)?.removeView(tabsContainer)
         (layoutButton.parent as? ViewGroup)?.removeView(layoutButton)
+        miniSoundboardTabsVerticalLayout = vertical
+        miniSoundboardTabsScrollHost = null
         tabsCard.orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
         tabsCard.gravity = Gravity.CENTER
         tabsContainer.orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
@@ -6127,6 +6172,7 @@ class FloatingOverlayService : Service() {
         if (vertical) {
             tabsCard.addView(
                 ScrollView(this).apply {
+                    miniSoundboardTabsScrollHost = this
                     isVerticalScrollBarEnabled = false
                     overScrollMode = View.OVER_SCROLL_NEVER
                     clipChildren = true
@@ -6162,6 +6208,7 @@ class FloatingOverlayService : Service() {
         } else {
             tabsCard.addView(
                 HorizontalScrollView(this).apply {
+                    miniSoundboardTabsScrollHost = this
                     isHorizontalScrollBarEnabled = false
                     overScrollMode = View.OVER_SCROLL_NEVER
                     clipChildren = true
@@ -6791,7 +6838,7 @@ class FloatingOverlayService : Service() {
             container.addView(
                 watermark,
                 FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    maxWatermarkWidth,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     Gravity.TOP or Gravity.END
                 ).apply {
