@@ -2,6 +2,8 @@ package com.lhtstudio.kigtts.app.overlay
 
 import android.animation.LayoutTransition
 import android.animation.ValueAnimator
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -243,6 +245,8 @@ class FloatingOverlayService : Service() {
     private var miniGroupIconView: TextView? = null
     private var miniGroupPrevButtonView: TextView? = null
     private var miniGroupNextButtonView: TextView? = null
+    private var miniQuickGroupHintView: TextView? = null
+    private var miniQuickGroupHintHideJob: Job? = null
     private var miniQuickCollapseButton: TextView? = null
     private var miniSubtitleBody: LinearLayout? = null
     private var miniQuickCardBody: LinearLayout? = null
@@ -261,6 +265,8 @@ class FloatingOverlayService : Service() {
     private var miniSoundboardTabsScrollHost: View? = null
     private var miniSoundboardTabsVerticalLayout: Boolean? = null
     private var miniSoundboardLayoutButtonView: TextView? = null
+    private var miniSoundboardGroupHintView: TextView? = null
+    private var miniSoundboardGroupHintHideJob: Job? = null
     private var miniActionFab: FrameLayout? = null
     private var miniActionFabIconView: TextView? = null
     private var miniBackButtonView: TextView? = null
@@ -307,6 +313,7 @@ class FloatingOverlayService : Service() {
     private var realtimeHostStateJob: Job? = null
     private var lastAppliedRealtimeQuickSubtitleRequestId = 0L
     private var lastAppliedRealtimeRecognizedSubtitleId = Long.MIN_VALUE
+    private var lastAppliedRealtimeQuickSubtitleConfigRevision = 0L
     private val pendingRealtimeHostActions = mutableListOf<(RealtimeHostService) -> Unit>()
     private val realtimeHostConnection =
         object : ServiceConnection {
@@ -318,6 +325,15 @@ class FloatingOverlayService : Service() {
                 realtimeHostStateJob = scope.launch {
                     realtimeHost!!.stateFlow().collectLatest { snapshot ->
                         realtimeHostState = snapshot
+                        val configRevision = snapshot.quickSubtitleConfigRevision
+                        val configJson = snapshot.quickSubtitleConfigJson
+                        if (
+                            configRevision > lastAppliedRealtimeQuickSubtitleConfigRevision &&
+                            configJson.isNotBlank()
+                        ) {
+                            lastAppliedRealtimeQuickSubtitleConfigRevision = configRevision
+                            applyRealtimeQuickSubtitleConfig(configJson)
+                        }
                         val requestId = snapshot.quickSubtitleRequestId
                         val subtitleText = snapshot.quickSubtitleText.trim()
                         if (
@@ -2960,6 +2976,17 @@ class FloatingOverlayService : Service() {
                 miniQuickItemsRightFadeView,
                 FrameLayout.LayoutParams(dp(24), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END)
             )
+            miniQuickGroupHintView = createOverlayGroupHintView()
+            addView(
+                miniQuickGroupHintView,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.END or Gravity.CENTER_VERTICAL
+                ).apply {
+                    rightMargin = dp(8)
+                }
+            )
         }
         val quickItemsScroller = FrameLayout(this).apply {
             clipChildren = true
@@ -3234,6 +3261,17 @@ class FloatingOverlayService : Service() {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     Gravity.CENTER
                 )
+            )
+            miniSoundboardGroupHintView = createOverlayGroupHintView()
+            addView(
+                miniSoundboardGroupHintView,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.END or Gravity.CENTER_VERTICAL
+                ).apply {
+                    rightMargin = dp(8)
+                }
             )
         }
         miniSoundboardTabsContainer = LinearLayout(this).apply {
@@ -3672,6 +3710,9 @@ class FloatingOverlayService : Service() {
         miniGroupIconView = null
         miniGroupPrevButtonView = null
         miniGroupNextButtonView = null
+        miniQuickGroupHintHideJob?.cancel()
+        miniQuickGroupHintHideJob = null
+        miniQuickGroupHintView = null
         miniQuickCollapseButton = null
         miniQuickCardBody = null
         miniQuickCardPreviewContainer = null
@@ -3689,6 +3730,9 @@ class FloatingOverlayService : Service() {
         miniSoundboardTabsScrollHost = null
         miniSoundboardTabsVerticalLayout = null
         miniSoundboardLayoutButtonView = null
+        miniSoundboardGroupHintHideJob?.cancel()
+        miniSoundboardGroupHintHideJob = null
+        miniSoundboardGroupHintView = null
         miniPreviewOverlay = null
         miniPreviewHost = null
         miniActionFab = null
@@ -5165,6 +5209,30 @@ class FloatingOverlayService : Service() {
                     )
             }
         }
+        miniQuickGroupHintView?.let { hint ->
+            hint.layoutParams =
+                if (landscapePhone) {
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                    ).apply {
+                        bottomMargin = dp(8)
+                        leftMargin = dp(6)
+                        rightMargin = dp(6)
+                    }
+                } else {
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        Gravity.END or Gravity.CENTER_VERTICAL
+                    ).apply {
+                        rightMargin = dp(8)
+                        leftMargin = dp(8)
+                    }
+                }
+            hint.bringToFront()
+        }
         miniQuickRow?.requestLayout()
         miniSubtitleCardView?.requestLayout()
         miniSubtitleBody?.requestLayout()
@@ -5240,6 +5308,17 @@ class FloatingOverlayService : Service() {
         quickSubtitleFontSizeSp = overlayFontSize ?: sharedFontFallback
         syncBluetoothMediaTitleToCommittedQuickSubtitle()
         quickSubtitleConfigLoaded = true
+    }
+
+    private fun applyRealtimeQuickSubtitleConfig(raw: String) {
+        val preservedOverlayFontSize = quickSubtitleFontSizeSp
+        runCatching { parseQuickSubtitleConfig(raw) }
+            .onFailure { AppLogger.e("FloatingOverlayService.applyRealtimeQuickSubtitleConfig failed", it) }
+            .onSuccess {
+                quickSubtitleFontSizeSp = preservedOverlayFontSize.coerceIn(28f, 96f)
+                quickSubtitleConfigLoaded = true
+                refreshQuickSubtitleUi()
+            }
     }
 
     private fun syncBluetoothMediaTitleToCommittedQuickSubtitle(
@@ -5497,7 +5576,7 @@ class FloatingOverlayService : Service() {
             ?: defaultQuickSubtitleGroups().first()
     }
 
-    private fun shiftQuickSubtitleGroup(delta: Int) {
+    private fun shiftQuickSubtitleGroup(delta: Int, holdHintUntilRelease: Boolean = false) {
         if (quickSubtitleGroups.isEmpty()) return
         saveMiniQuickItemsScrollState()
         val currentGroupId = currentMiniQuickSubtitleGroupId()
@@ -5506,7 +5585,9 @@ class FloatingOverlayService : Service() {
         val nextIndex = (currentIndex + delta).floorMod(quickSubtitleGroups.size)
         if (nextIndex == currentIndex) return
         performOverlayKeyHaptic(miniQuickSwitcherView ?: miniGroupIconView)
-        miniQuickSubtitleSelectedGroupId = quickSubtitleGroups[nextIndex].id
+        val nextGroup = quickSubtitleGroups[nextIndex]
+        miniQuickSubtitleSelectedGroupId = nextGroup.id
+        showMiniQuickGroupHint(nextGroup.title, holdUntilRelease = holdHintUntilRelease)
         refreshQuickSubtitleUi()
     }
 
@@ -5698,6 +5779,119 @@ class FloatingOverlayService : Service() {
             .start()
     }
 
+    private fun createOverlayGroupHintView(): TextView =
+        TextView(this).apply {
+            visibility = View.GONE
+            alpha = 0f
+            background = roundedRectDrawable(overlayRadiusDp, overlayCardColor())
+            elevation = dp(8).toFloat()
+            setTextColor(overlayOnSurfaceColor())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+            typeface = Typeface.DEFAULT_BOLD
+            includeFontPadding = false
+            gravity = Gravity.CENTER
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            minWidth = dp(96)
+            maxWidth = dp(220)
+            isClickable = false
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+
+    private fun normalizedGroupHintTitle(title: String): String =
+        title.trim().ifBlank { "未命名分组" }
+
+    private fun showOverlayGroupHint(
+        view: TextView?,
+        title: String,
+        hideJob: Job?,
+        setHideJob: (Job?) -> Unit,
+        holdUntilRelease: Boolean = false
+    ) {
+        val target = view ?: return
+        hideJob?.cancel()
+        target.text = normalizedGroupHintTitle(title)
+        target.visibility = View.VISIBLE
+        target.bringToFront()
+        target.animate().cancel()
+        target.animate().setListener(null)
+        target.animate()
+            .alpha(1f)
+            .setDuration(140L)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+        if (!holdUntilRelease) {
+            setHideJob(scope.launch {
+                delay(900L)
+                hideOverlayGroupHint(target)
+                setHideJob(null)
+            })
+        } else {
+            setHideJob(null)
+        }
+    }
+
+    private fun releaseOverlayGroupHint(
+        view: TextView?,
+        hideJob: Job?,
+        setHideJob: (Job?) -> Unit
+    ) {
+        val target = view ?: return
+        hideJob?.cancel()
+        setHideJob(scope.launch {
+            delay(320L)
+            hideOverlayGroupHint(target)
+            setHideJob(null)
+        })
+    }
+
+    private fun hideOverlayGroupHint(view: TextView?) {
+        val target = view ?: return
+        target.animate().cancel()
+        target.animate()
+            .alpha(0f)
+            .setDuration(180L)
+            .setInterpolator(DecelerateInterpolator())
+            .setListener(
+                object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) {
+                        target.visibility = View.GONE
+                        target.animate().setListener(null)
+                    }
+                }
+            )
+            .start()
+    }
+
+    private fun showMiniQuickGroupHint(title: String, holdUntilRelease: Boolean = false) {
+        showOverlayGroupHint(
+            view = miniQuickGroupHintView,
+            title = title,
+            hideJob = miniQuickGroupHintHideJob,
+            setHideJob = { miniQuickGroupHintHideJob = it },
+            holdUntilRelease = holdUntilRelease
+        )
+    }
+
+    private fun releaseMiniQuickGroupHint() {
+        releaseOverlayGroupHint(
+            view = miniQuickGroupHintView,
+            hideJob = miniQuickGroupHintHideJob,
+            setHideJob = { miniQuickGroupHintHideJob = it }
+        )
+    }
+
+    private fun showMiniSoundboardGroupHint(title: String) {
+        if (!isPhoneLandscapeUi()) return
+        showOverlayGroupHint(
+            view = miniSoundboardGroupHintView,
+            title = title,
+            hideJob = miniSoundboardGroupHintHideJob,
+            setHideJob = { miniSoundboardGroupHintHideJob = it }
+        )
+    }
+
     private fun refreshMiniQuickCardIndicators() {
         val container = miniQuickCardIndicatorContainer ?: return
         val vertical = isPhoneLandscapeUi()
@@ -5762,7 +5956,7 @@ class FloatingOverlayService : Service() {
                         val currentPrimary = if (horizontalDrag) event.rawX else event.rawY
                         val delta = currentPrimary - lastPrimary
                         if (abs(delta) >= threshold) {
-                            shiftQuickSubtitleGroup(if (delta > 0f) 1 else -1)
+                            shiftQuickSubtitleGroup(if (delta > 0f) 1 else -1, holdHintUntilRelease = true)
                             lastPrimary = currentPrimary
                             dragged = true
                         }
@@ -5772,6 +5966,9 @@ class FloatingOverlayService : Service() {
                     MotionEvent.ACTION_UP,
                     MotionEvent.ACTION_CANCEL -> {
                         requestDisallowIntercept(v, false)
+                        if (dragged) {
+                            releaseMiniQuickGroupHint()
+                        }
                         if (event.actionMasked == MotionEvent.ACTION_UP && !dragged) {
                             v.performClick()
                         }
@@ -5999,7 +6196,10 @@ class FloatingOverlayService : Service() {
     }
 
     private fun selectMiniSoundboardGroup(groupId: Long) {
-        if (soundboardConfig.groups.none { it.id == groupId }) return
+        val targetGroup = soundboardConfig.groups.firstOrNull { it.id == groupId } ?: return
+        if (targetGroup.id != miniSoundboardSelectedGroupId) {
+            showMiniSoundboardGroupHint(targetGroup.title)
+        }
         miniSoundboardSelectedGroupId = groupId
         soundboardConfig = soundboardConfig.copy(selectedGroupId = groupId)
         SoundboardManager.updateCachedConfig(soundboardConfig)
@@ -6171,6 +6371,17 @@ class FloatingOverlayService : Service() {
                     topMargin = dp(10)
                 }
             )
+        }
+        miniSoundboardGroupHintView?.let { hint ->
+            hint.layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.END or Gravity.CENTER_VERTICAL
+            ).apply {
+                rightMargin = dp(8)
+                leftMargin = dp(8)
+            }
+            hint.bringToFront()
         }
     }
 

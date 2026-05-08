@@ -53,7 +53,9 @@ data class RealtimeHostState(
     val aec3Diag: String = "AEC3 诊断：未启用",
     val speakerLastSimilarity: Float = -1f,
     val quickSubtitleRequestId: Long = 0L,
-    val quickSubtitleText: String = ""
+    val quickSubtitleText: String = "",
+    val quickSubtitleConfigRevision: Long = 0L,
+    val quickSubtitleConfigJson: String = ""
 )
 
 class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
@@ -74,6 +76,7 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
     private var manualRecognizedIdSeed = -1L
     private var quickSubtitlePlayOnSend = true
     private var lastQuickSubtitleRequestId = 0L
+    private var lastQuickSubtitleConfigRevision = 0L
     @Volatile private var quickSubtitlePersistRevision = 0L
 
     private val _state = MutableStateFlow(RealtimeHostState())
@@ -127,6 +130,18 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
     fun stateFlow(): StateFlow<RealtimeHostState> = _state.asStateFlow()
 
     fun quickSubtitleRequestFlow(): StateFlow<ExternalQuickSubtitleRequest?> = _quickSubtitleRequests.asStateFlow()
+
+    fun publishQuickSubtitleConfig(json: String) {
+        val normalized = json.trim()
+        if (normalized.isEmpty()) return
+        val revision = nextQuickSubtitleConfigRevision()
+        updateState {
+            it.copy(
+                quickSubtitleConfigRevision = revision,
+                quickSubtitleConfigJson = normalized
+            )
+        }
+    }
 
     fun consumeQuickSubtitleRequest(requestId: Long) {
         if (_quickSubtitleRequests.value?.requestId == requestId) {
@@ -458,6 +473,14 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
         val now = SystemClock.uptimeMillis()
         val next = if (now > lastQuickSubtitleRequestId) now else lastQuickSubtitleRequestId + 1L
         lastQuickSubtitleRequestId = next
+        return next
+    }
+
+    private fun nextQuickSubtitleConfigRevision(): Long {
+        val now = SystemClock.uptimeMillis()
+        val next =
+            if (now > lastQuickSubtitleConfigRevision) now else lastQuickSubtitleConfigRevision + 1L
+        lastQuickSubtitleConfigRevision = next
         return next
     }
 
