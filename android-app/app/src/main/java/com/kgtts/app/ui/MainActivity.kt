@@ -1101,6 +1101,8 @@ class MainViewModel(
         private set
     private var quickSubtitleNextGroupId = 4L
     private var quickSubtitleSaving = false
+    private var lastAppliedQuickSubtitleRequestId = 0L
+    private var lastAppliedRecognizedSubtitleId = Long.MIN_VALUE
     private var soundboardNextGroupId = 2L
     private var soundboardNextItemId = 1L
     private var soundboardSaving = false
@@ -1159,6 +1161,8 @@ class MainViewModel(
                 realtimeRecognized = snapshot.recognized
                 realtimeInputLevel = snapshot.inputLevel.coerceIn(0f, 1f)
                 realtimePlaybackProgress = snapshot.playbackProgress.coerceIn(0f, 1f)
+                val quickSubtitleRequestId = snapshot.quickSubtitleRequestId
+                val quickSubtitleText = snapshot.quickSubtitleText.trim()
                 val previousSpeakerSimilarity = uiState.speakerLastSimilarity
                 uiState = uiState.copy(
                     asrDir = snapshot.asrDir,
@@ -1178,6 +1182,24 @@ class MainViewModel(
                     inputDeviceLabel = snapshot.inputDeviceLabel.ifBlank { uiState.inputDeviceLabel },
                     outputDeviceLabel = snapshot.outputDeviceLabel.ifBlank { uiState.outputDeviceLabel }
                 )
+                if (quickSubtitleRequestId > 0L && quickSubtitleText.isNotEmpty()) {
+                    applyExternalQuickSubtitleRequest(
+                        requestId = quickSubtitleRequestId,
+                        target = OverlayBridge.TARGET_SUBTITLE,
+                        text = quickSubtitleText
+                    )
+                }
+                val latest = snapshot.recognized.firstOrNull()
+                val latestText = latest?.text?.trim().orEmpty()
+                if (
+                    latest != null &&
+                    latest.id >= 0L &&
+                    latest.id != lastAppliedRecognizedSubtitleId &&
+                    latestText.isNotEmpty()
+                ) {
+                    lastAppliedRecognizedSubtitleId = latest.id
+                    applyQuickSubtitleResultText(latestText)
+                }
             }
         }
         hostQuickSubtitleJob = viewModelScope.launch {
@@ -1755,7 +1777,15 @@ class MainViewModel(
         }
     }
 
-    fun applyExternalQuickSubtitleRequest(target: String, text: String) {
+    fun applyExternalQuickSubtitleRequest(
+        requestId: Long,
+        target: String,
+        text: String
+    ) {
+        if (requestId > 0L && requestId <= lastAppliedQuickSubtitleRequestId) return
+        if (requestId > 0L) {
+            lastAppliedQuickSubtitleRequestId = requestId
+        }
         val normalized = text.trim()
         when (target) {
             OverlayBridge.TARGET_OPEN -> {
@@ -1768,12 +1798,25 @@ class MainViewModel(
                 saveQuickSubtitleConfig()
             }
             else -> {
-                if (normalized.isEmpty()) return
-                commitQuickSubtitleCurrentText(normalized)
-                markQuickSubtitleContentSubmitted()
-                saveQuickSubtitleConfig()
+                applyQuickSubtitleResultText(normalized)
             }
         }
+    }
+
+    private fun applyQuickSubtitleResultText(text: String) {
+        val normalized = text.trim()
+        if (normalized.isEmpty()) return
+        commitQuickSubtitleCurrentText(normalized)
+        markQuickSubtitleContentSubmitted()
+        saveQuickSubtitleConfig()
+    }
+
+    fun applyExternalQuickSubtitleRequest(target: String, text: String) {
+        applyExternalQuickSubtitleRequest(
+            requestId = nextQuickSubtitleLaunchRequestId(),
+            target = target,
+            text = text
+        )
     }
 
     fun setQuickSubtitleFontSize(size: Float) {
@@ -10286,7 +10329,11 @@ fun AppScaffold(viewModel: MainViewModel) {
                         quickSubtitleNavController.popBackStack(QuickSubtitleRoutes.Main, inclusive = false)
                     }
                 }
-                viewModel.applyExternalQuickSubtitleRequest(request.target, request.text)
+                viewModel.applyExternalQuickSubtitleRequest(
+                    requestId = request.requestId,
+                    target = request.target,
+                    text = request.text
+                )
             }
         }
         viewModel.consumeQuickSubtitleLaunchRequest(request.requestId)

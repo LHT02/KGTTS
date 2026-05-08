@@ -305,6 +305,8 @@ class FloatingOverlayService : Service() {
     private var realtimeHostBound = false
     private var realtimeHostState = RealtimeHostState()
     private var realtimeHostStateJob: Job? = null
+    private var lastAppliedRealtimeQuickSubtitleRequestId = 0L
+    private var lastAppliedRealtimeRecognizedSubtitleId = Long.MIN_VALUE
     private val pendingRealtimeHostActions = mutableListOf<(RealtimeHostService) -> Unit>()
     private val realtimeHostConnection =
         object : ServiceConnection {
@@ -316,6 +318,32 @@ class FloatingOverlayService : Service() {
                 realtimeHostStateJob = scope.launch {
                     realtimeHost!!.stateFlow().collectLatest { snapshot ->
                         realtimeHostState = snapshot
+                        val requestId = snapshot.quickSubtitleRequestId
+                        val subtitleText = snapshot.quickSubtitleText.trim()
+                        if (
+                            requestId > lastAppliedRealtimeQuickSubtitleRequestId &&
+                            subtitleText.isNotEmpty()
+                        ) {
+                            lastAppliedRealtimeQuickSubtitleRequestId = requestId
+                            quickSubtitleCurrentText = subtitleText
+                            overlayHintText = ""
+                            saveQuickSubtitleConfig()
+                            refreshQuickSubtitleUi()
+                        }
+                        val latest = snapshot.recognized.firstOrNull()
+                        val latestText = latest?.text?.trim().orEmpty()
+                        if (
+                            latest != null &&
+                            latest.id >= 0L &&
+                            latest.id != lastAppliedRealtimeRecognizedSubtitleId &&
+                            latestText.isNotEmpty()
+                        ) {
+                            lastAppliedRealtimeRecognizedSubtitleId = latest.id
+                            quickSubtitleCurrentText = latestText
+                            overlayHintText = ""
+                            saveQuickSubtitleConfig()
+                            refreshQuickSubtitleUi()
+                        }
                         updateFabUi()
                         if (pttPressed && confirmOverlay?.visibility == View.VISIBLE) {
                             updateConfirmVisuals(currentDragAction)
