@@ -51,7 +51,11 @@ data class RealtimeHostState(
     val pushToTalkStreamingText: String = "",
     val aec3Status: String = "未启用",
     val aec3Diag: String = "AEC3 诊断：未启用",
-    val speakerLastSimilarity: Float = -1f
+    val speakerLastSimilarity: Float = -1f,
+    val quickSubtitleRequestId: Long = 0L,
+    val quickSubtitleText: String = "",
+    val quickSubtitleConfigRevision: Long = 0L,
+    val quickSubtitleConfigJson: String = ""
 )
 
 class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
@@ -71,6 +75,9 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
     private var lastPttHistoryAtMs = 0L
     private var manualRecognizedIdSeed = -1L
     private var quickSubtitlePlayOnSend = true
+    private var lastQuickSubtitleRequestId = 0L
+    private var lastQuickSubtitleConfigRevision = 0L
+    @Volatile private var quickSubtitlePersistRevision = 0L
 
     private val _state = MutableStateFlow(RealtimeHostState())
     private val _quickSubtitleRequests = MutableStateFlow<ExternalQuickSubtitleRequest?>(null)
@@ -123,6 +130,18 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
     fun stateFlow(): StateFlow<RealtimeHostState> = _state.asStateFlow()
 
     fun quickSubtitleRequestFlow(): StateFlow<ExternalQuickSubtitleRequest?> = _quickSubtitleRequests.asStateFlow()
+
+    fun publishQuickSubtitleConfig(json: String) {
+        val normalized = json.trim()
+        if (normalized.isEmpty()) return
+        val revision = nextQuickSubtitleConfigRevision()
+        updateState {
+            it.copy(
+                quickSubtitleConfigRevision = revision,
+                quickSubtitleConfigJson = normalized
+            )
+        }
+    }
 
     fun consumeQuickSubtitleRequest(requestId: Long) {
         if (_quickSubtitleRequests.value?.requestId == requestId) {
@@ -430,15 +449,58 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
         text: String,
         navigateToPage: Boolean = false
     ) {
+        val normalized = text.trim()
         val request = ExternalQuickSubtitleRequest(
-            requestId = SystemClock.uptimeMillis(),
+            requestId = nextQuickSubtitleRequestId(),
             target = target,
-            text = text,
+            text = normalized,
             navigateToPage = navigateToPage
         )
         _quickSubtitleRequests.value = request
         if (target == OverlayBridge.TARGET_SUBTITLE) {
-            syncBluetoothMediaTitleToCommittedQuickSubtitle(text)
+            updateState {
+                it.copy(
+                    quickSubtitleRequestId = request.requestId,
+                    quickSubtitleText = normalized
+                )
+            }
+            syncBluetoothMediaTitleToCommittedQuickSubtitle(normalized)
+            persistCommittedQuickSubtitleTextAsync(normalized)
+        }
+    }
+
+    private fun nextQuickSubtitleRequestId(): Long {
+        val now = SystemClock.uptimeMillis()
+        val next = if (now > lastQuickSubtitleRequestId) now else lastQuickSubtitleRequestId + 1L
+        lastQuickSubtitleRequestId = next
+        return next
+    }
+
+    private fun nextQuickSubtitleConfigRevision(): Long {
+        val now = SystemClock.uptimeMillis()
+        val next =
+            if (now > lastQuickSubtitleConfigRevision) now else lastQuickSubtitleConfigRevision + 1L
+        lastQuickSubtitleConfigRevision = next
+        return next
+    }
+
+    private fun persistCommittedQuickSubtitleTextAsync(text: String) {
+        val normalized = text.trim()
+        if (normalized.isEmpty()) return
+        val revision = ++quickSubtitlePersistRevision
+        serviceScope.launch(Dispatchers.IO) {
+            runCatching {
+                val root = UserPrefs.getQuickSubtitleConfig(applicationContext)
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { raw -> runCatching { JSONObject(raw) }.getOrDefault(JSONObject()) }
+                    ?: JSONObject()
+                root.put("currentText", normalized)
+                if (revision == quickSubtitlePersistRevision) {
+                    UserPrefs.setQuickSubtitleConfig(applicationContext, root.toString())
+                }
+            }.onFailure {
+                AppLogger.e("RealtimeHostService.persistCommittedQuickSubtitleText failed", it)
+            }
         }
     }
 
@@ -646,13 +708,13 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
                 if (!isPttConfirmMode && normalized.isNotEmpty()) {
                     appendRecognizedHistory(normalized, id)
                     if (currentSettings.asrSendToQuickSubtitle) {
-                    emitQuickSubtitleRequest(
-                        OverlayBridge.TARGET_SUBTITLE,
-                        normalized,
-                        navigateToPage = false
-                    )
+                        emitQuickSubtitleRequest(
+                            OverlayBridge.TARGET_SUBTITLE,
+                            normalized,
+                            navigateToPage = false
+                        )
+                    }
                 }
-            }
                 if (isPttConfirmMode) {
                     if (isPttConfirmPressed && normalized.isNotEmpty()) {
                         appendPttFinalTranscript(normalized)

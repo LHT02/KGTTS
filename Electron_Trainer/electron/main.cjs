@@ -305,6 +305,19 @@ function resolve7zaPath() {
   return '';
 }
 
+function resolveFfmpegPath() {
+  const candidates = [];
+  if (!isDev) {
+    candidates.push(path.join(process.resourcesPath, 'tools', 'ffmpeg.exe'));
+  }
+  candidates.push(path.join(__dirname, '..', 'node_modules', 'ffmpeg-static', 'ffmpeg.exe'));
+  candidates.push(path.join(__dirname, '..', '..', 'Electron_Trainer', 'node_modules', 'ffmpeg-static', 'ffmpeg.exe'));
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return '';
+}
+
 function runProcess(exe, args, opts = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(exe, args, {
@@ -331,6 +344,28 @@ function runProcess(exe, args, opts = {}) {
       reject(new Error((stderr || stdout || `${exe} exited with code ${code}`).trim()));
     });
   });
+}
+
+function formatFfmpegSeconds(ms) {
+  const seconds = Math.max(0, Number(ms) || 0) / 1000;
+  return seconds.toFixed(3).replace(/\.?0+$/, '') || '0';
+}
+
+async function transcodeSoundboardItemToAac(ffmpegPath, item, outputPath) {
+  const startMs = Math.max(0, Number(item.trimStartMs) || 0);
+  const fallbackEndMs = Math.max(0, Number(item.durationMs) || 0);
+  const rawEndMs = Math.max(0, Number(item.trimEndMs) || 0);
+  const endMs = rawEndMs || fallbackEndMs;
+  const durationMs = endMs > startMs ? endMs - startMs : 0;
+  const args = ['-y', '-hide_banner', '-loglevel', 'error', '-i', item.audioPath];
+  if (startMs > 0) {
+    args.push('-ss', formatFfmpegSeconds(startMs));
+  }
+  if (durationMs > 0) {
+    args.push('-t', formatFfmpegSeconds(durationMs));
+  }
+  args.push('-vn', '-map_metadata', '-1', '-c:a', 'aac', '-b:a', '160k', '-f', 'adts', outputPath);
+  await runProcess(ffmpegPath, args);
 }
 
 function normalizeSoundboardExportConfig(config) {
@@ -362,6 +397,10 @@ async function exportSoundboardPackage(config, outputPath) {
   if (!sevenZip) {
     return { ok: false, message: '缺少 7z 打包组件，请重新安装 KIGTTS Trainer。' };
   }
+  const ffmpegPath = resolveFfmpegPath();
+  if (!ffmpegPath) {
+    return { ok: false, message: '缺少音频转换组件，请重新安装 KIGTTS Trainer。' };
+  }
   const normalized = normalizeSoundboardExportConfig(config);
   if (!normalized.groups.some((group) => group.items.length > 0)) {
     return { ok: false, message: '音效包里还没有音效。' };
@@ -392,29 +431,46 @@ async function exportSoundboardPackage(config, outputPath) {
         items: group.items.map((item) => {
           let audioFile = '';
           if (item.audioPath && fs.existsSync(item.audioPath)) {
-            const ext = path.extname(item.audioPath) || '.audio';
-            let entry = `audio/${sanitizeSoundboardFileSegment(item.title)}_${item.id}${ext}`;
+            let entry = `audio/${sanitizeSoundboardFileSegment(item.title)}_${item.id}.aac`;
             let suffix = 2;
             while (usedEntries.has(entry)) {
-              entry = `audio/${sanitizeSoundboardFileSegment(item.title)}_${item.id}_${suffix}${ext}`;
+              entry = `audio/${sanitizeSoundboardFileSegment(item.title)}_${item.id}_${suffix}.aac`;
               suffix += 1;
             }
             usedEntries.add(entry);
-            fs.copyFileSync(item.audioPath, path.join(tempRoot, entry));
             audioFile = entry.replace(/\\/g, '/');
           }
+          const exportedDurationMs =
+            item.audioPath && fs.existsSync(item.audioPath)
+              ? Math.max(0, (item.trimEndMs || item.durationMs || 0) - Math.max(0, item.trimStartMs || 0)) || item.durationMs || 0
+              : item.durationMs;
           return {
             id: item.id,
             title: item.title,
             wakeWord: item.wakeWord,
-            durationMs: item.durationMs,
-            trimStartMs: item.trimStartMs,
-            trimEndMs: item.trimEndMs || item.durationMs || 0,
+            durationMs: exportedDurationMs,
+            trimStartMs: 0,
+            trimEndMs: exportedDurationMs,
             audioFile,
           };
         }),
       })),
     };
+    for (const group of normalized.groups) {
+      for (const item of group.items) {
+        if (!item.audioPath || !fs.existsSync(item.audioPath)) continue;
+        let entry = root.groups
+          .find((rootGroup) => rootGroup.id === group.id)
+          ?.items.find((rootItem) => rootItem.id === item.id)?.audioFile;
+        if (!entry) continue;
+        entry = entry.replace(/\//g, path.sep);
+        try {
+          await transcodeSoundboardItemToAac(ffmpegPath, item, path.join(tempRoot, entry));
+        } catch (err) {
+          throw new Error(`音效“${item.title}”转换 AAC 失败：${String(err?.message || err)}`);
+        }
+      }
+    }
     fs.writeFileSync(path.join(tempRoot, 'preset.json'), JSON.stringify(root, null, 2), 'utf8');
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     if (fs.existsSync(outPath)) fs.rmSync(outPath, { force: true });

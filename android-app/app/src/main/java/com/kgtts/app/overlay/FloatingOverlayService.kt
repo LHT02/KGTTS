@@ -2,6 +2,8 @@ package com.lhtstudio.kigtts.app.overlay
 
 import android.animation.LayoutTransition
 import android.animation.ValueAnimator
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -243,7 +245,22 @@ class FloatingOverlayService : Service() {
     private var miniGroupIconView: TextView? = null
     private var miniGroupPrevButtonView: TextView? = null
     private var miniGroupNextButtonView: TextView? = null
+    private var miniQuickGroupHintView: TextView? = null
+    private var miniQuickGroupHintHideJob: Job? = null
     private var miniQuickCollapseButton: TextView? = null
+    private var miniQuickListOverlayView: LinearLayout? = null
+    private var miniQuickListContentCardView: FrameLayout? = null
+    private var miniQuickListRecyclerView: RecyclerView? = null
+    private var miniQuickListAdapter: MiniQuickTextListAdapter? = null
+    private var miniQuickListTabsCardView: LinearLayout? = null
+    private var miniQuickListTabsContainer: LinearLayout? = null
+    private var miniQuickListTabsScrollHost: View? = null
+    private var miniQuickListTabsVerticalLayout: Boolean? = null
+    private var miniQuickListLayoutButtonView: TextView? = null
+    private var miniQuickListGroupHintView: TextView? = null
+    private var miniQuickListGroupHintHideJob: Job? = null
+    private var miniQuickListSelectedGroupId: Long? = null
+    private var miniQuickListGridMode = true
     private var miniSubtitleBody: LinearLayout? = null
     private var miniQuickCardBody: LinearLayout? = null
     private var miniQuickCardPreviewContainer: FrameLayout? = null
@@ -261,6 +278,8 @@ class FloatingOverlayService : Service() {
     private var miniSoundboardTabsScrollHost: View? = null
     private var miniSoundboardTabsVerticalLayout: Boolean? = null
     private var miniSoundboardLayoutButtonView: TextView? = null
+    private var miniSoundboardGroupHintView: TextView? = null
+    private var miniSoundboardGroupHintHideJob: Job? = null
     private var miniActionFab: FrameLayout? = null
     private var miniActionFabIconView: TextView? = null
     private var miniBackButtonView: TextView? = null
@@ -305,6 +324,9 @@ class FloatingOverlayService : Service() {
     private var realtimeHostBound = false
     private var realtimeHostState = RealtimeHostState()
     private var realtimeHostStateJob: Job? = null
+    private var lastAppliedRealtimeQuickSubtitleRequestId = 0L
+    private var lastAppliedRealtimeRecognizedSubtitleId = Long.MIN_VALUE
+    private var lastAppliedRealtimeQuickSubtitleConfigRevision = 0L
     private val pendingRealtimeHostActions = mutableListOf<(RealtimeHostService) -> Unit>()
     private val realtimeHostConnection =
         object : ServiceConnection {
@@ -316,6 +338,41 @@ class FloatingOverlayService : Service() {
                 realtimeHostStateJob = scope.launch {
                     realtimeHost!!.stateFlow().collectLatest { snapshot ->
                         realtimeHostState = snapshot
+                        val configRevision = snapshot.quickSubtitleConfigRevision
+                        val configJson = snapshot.quickSubtitleConfigJson
+                        if (
+                            configRevision > lastAppliedRealtimeQuickSubtitleConfigRevision &&
+                            configJson.isNotBlank()
+                        ) {
+                            lastAppliedRealtimeQuickSubtitleConfigRevision = configRevision
+                            applyRealtimeQuickSubtitleConfig(configJson)
+                        }
+                        val requestId = snapshot.quickSubtitleRequestId
+                        val subtitleText = snapshot.quickSubtitleText.trim()
+                        if (
+                            requestId > lastAppliedRealtimeQuickSubtitleRequestId &&
+                            subtitleText.isNotEmpty()
+                        ) {
+                            lastAppliedRealtimeQuickSubtitleRequestId = requestId
+                            quickSubtitleCurrentText = subtitleText
+                            overlayHintText = ""
+                            saveQuickSubtitleConfig()
+                            refreshQuickSubtitleUi()
+                        }
+                        val latest = snapshot.recognized.firstOrNull()
+                        val latestText = latest?.text?.trim().orEmpty()
+                        if (
+                            latest != null &&
+                            latest.id >= 0L &&
+                            latest.id != lastAppliedRealtimeRecognizedSubtitleId &&
+                            latestText.isNotEmpty()
+                        ) {
+                            lastAppliedRealtimeRecognizedSubtitleId = latest.id
+                            quickSubtitleCurrentText = latestText
+                            overlayHintText = ""
+                            saveQuickSubtitleConfig()
+                            refreshQuickSubtitleUi()
+                        }
                         updateFabUi()
                         if (pttPressed && confirmOverlay?.visibility == View.VISIBLE) {
                             updateConfirmVisuals(currentDragAction)
@@ -727,6 +784,12 @@ class FloatingOverlayService : Service() {
                 performOverlayKeyHaptic(holder.root)
                 submitQuickSubtitleText(item)
             }
+            holder.root.setOnLongClickListener {
+                if (item.isBlank()) return@setOnLongClickListener true
+                performOverlayKeyHaptic(holder.root)
+                showMiniQuickTextListOverlay()
+                true
+            }
         }
 
         override fun getItemCount(): Int = items.size
@@ -734,6 +797,80 @@ class FloatingOverlayService : Service() {
         fun submitItems(newItems: List<String>) {
             items = newItems.toList()
             notifyDataSetChanged()
+        }
+    }
+
+    private inner class MiniQuickTextListAdapter :
+        RecyclerView.Adapter<MiniQuickTextListAdapter.TextViewHolder>() {
+        private var items: List<String> = emptyList()
+        private var gridMode = true
+
+        inner class TextViewHolder(
+            val root: FrameLayout,
+            val textView: TextView
+        ) : RecyclerView.ViewHolder(root)
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): TextViewHolder {
+            val textView = TextView(parent.context).apply {
+                setTextColor(overlayOnSurfaceColor())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                typeface = Typeface.DEFAULT_BOLD
+                ellipsize = TextUtils.TruncateAt.END
+                includeFontPadding = false
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                textAlignment = View.TEXT_ALIGNMENT_VIEW_START
+            }
+            val root = FrameLayout(parent.context).apply {
+                background = roundedRectDrawable(overlayRadiusDp, overlayCardColor())
+                elevation = dp(4).toFloat()
+                clipChildren = true
+                clipToPadding = true
+                isClickable = true
+                isFocusable = true
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    foreground = selectableDrawable()
+                }
+                addView(
+                    textView,
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                )
+            }
+            return TextViewHolder(root, textView)
+        }
+
+        override fun onBindViewHolder(holder: TextViewHolder, position: Int) {
+            val item = items.getOrNull(position).orEmpty()
+            holder.root.layoutParams = recyclerItemLayoutParams(gridMode)
+            holder.root.setPadding(dp(12), dp(8), dp(12), dp(8))
+            holder.textView.maxLines = if (gridMode) 2 else 1
+            holder.textView.text = item
+            holder.root.setOnClickListener {
+                if (item.isBlank()) return@setOnClickListener
+                performOverlayKeyHaptic(holder.root)
+                hideMiniQuickTextListOverlay()
+                submitQuickSubtitleText(item)
+            }
+        }
+
+        override fun getItemCount(): Int = items.size
+
+        fun submit(newItems: List<String>, grid: Boolean) {
+            items = newItems.toList()
+            gridMode = grid
+            notifyDataSetChanged()
+        }
+
+        private fun recyclerItemLayoutParams(grid: Boolean): RecyclerView.LayoutParams {
+            return RecyclerView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                if (grid) dp(74) else dp(62)
+            ).apply {
+                val gap = dp(4)
+                setMargins(gap, gap, gap, gap)
+            }
         }
     }
 
@@ -1292,6 +1429,7 @@ class FloatingOverlayService : Service() {
     private fun healFabInteractionState(reason: String) {
         val root = fabRoot ?: return
         if (!settings.floatingOverlayEnabled) return
+        reconcileExpandedWindowState("heal_$reason")
         val now = SystemClock.uptimeMillis()
         if (draggingFab && now - lastFabTouchUptime > 3000L) {
             AppLogger.w("FloatingOverlayService.heal stale fab drag reason=$reason")
@@ -2009,13 +2147,20 @@ class FloatingOverlayService : Service() {
     @Suppress("DEPRECATION")
     @SuppressLint("ClickableViewAccessibility")
     private fun ensureWindows() {
-        if (
+        val hasAllWindows =
             fabRoot != null &&
-            fabTouchProxy != null &&
-            panelRoot != null &&
-            miniRoot != null &&
-            confirmOverlay != null
+                fabTouchProxy != null &&
+                panelRoot != null &&
+                miniRoot != null &&
+                confirmOverlay != null
+        if (
+            hasAllWindows &&
+            listOf(fabRoot, fabTouchProxy, panelRoot, miniRoot, confirmOverlay)
+                .all { it?.isAttachedToWindow == true }
         ) return
+        if (hasAllWindows) {
+            AppLogger.w("FloatingOverlayService.ensureWindows rebuild detached window")
+        }
         if (fabRoot != null || fabTouchProxy != null || panelRoot != null || miniRoot != null || confirmOverlay != null) {
             removeWindows()
         }
@@ -2932,6 +3077,17 @@ class FloatingOverlayService : Service() {
                 miniQuickItemsRightFadeView,
                 FrameLayout.LayoutParams(dp(24), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END)
             )
+            miniQuickGroupHintView = createOverlayGroupHintView()
+            addView(
+                miniQuickGroupHintView,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.END or Gravity.CENTER_VERTICAL
+                ).apply {
+                    rightMargin = dp(8)
+                }
+            )
         }
         val quickItemsScroller = FrameLayout(this).apply {
             clipChildren = true
@@ -3207,6 +3363,17 @@ class FloatingOverlayService : Service() {
                     Gravity.CENTER
                 )
             )
+            miniSoundboardGroupHintView = createOverlayGroupHintView()
+            addView(
+                miniSoundboardGroupHintView,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.END or Gravity.CENTER_VERTICAL
+                ).apply {
+                    rightMargin = dp(8)
+                }
+            )
         }
         miniSoundboardTabsContainer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -3288,6 +3455,132 @@ class FloatingOverlayService : Service() {
                 }
             )
         }
+        miniQuickListAdapter = MiniQuickTextListAdapter()
+        miniQuickListRecyclerView = RecyclerView(this).apply {
+            adapter = miniQuickListAdapter
+            overScrollMode = View.OVER_SCROLL_NEVER
+            clipChildren = true
+            clipToPadding = true
+            itemAnimator = null
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        miniQuickListTabsContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        miniQuickListLayoutButtonView =
+            symbolTextView("grid_view", 24f, overlayOnSurfaceColor()).apply {
+                gravity = Gravity.CENTER
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    foreground = selectableDrawable()
+                }
+                setOnClickListener {
+                    performOverlayKeyHaptic(this)
+                    miniQuickListGridMode = !miniQuickListGridMode
+                    refreshMiniQuickTextListOverlayUi()
+                }
+            }
+        miniQuickListTabsCardView = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = roundedRectDrawable(overlayRadiusDp, overlayCardColor())
+            elevation = dp(6).toFloat()
+            clipChildren = true
+            clipToPadding = true
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        miniQuickListContentCardView = FrameLayout(this).apply {
+            background = roundedRectDrawable(overlayRadiusDp, overlayCardColor())
+            elevation = dp(6).toFloat()
+            clipChildren = true
+            clipToPadding = true
+            setPadding(dp(6), dp(6), dp(6), dp(6))
+            addView(
+                LinearLayout(this@FloatingOverlayService).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(
+                        LinearLayout(this@FloatingOverlayService).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.CENTER_VERTICAL
+                            addView(
+                                TextView(this@FloatingOverlayService).apply {
+                                    text = "便捷字幕列表"
+                                    setTextColor(overlayOnSurfaceColor())
+                                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                                    typeface = Typeface.DEFAULT_BOLD
+                                    includeFontPadding = false
+                                    maxLines = 1
+                                    ellipsize = TextUtils.TruncateAt.END
+                                },
+                                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                            )
+                            addView(
+                                symbolTextView("close", 22f, overlayOnSurfaceColor()).apply {
+                                    gravity = Gravity.CENTER
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                        foreground = selectableDrawable()
+                                    }
+                                    setOnClickListener {
+                                        performOverlayKeyHaptic(this)
+                                        hideMiniQuickTextListOverlay()
+                                    }
+                                },
+                                LinearLayout.LayoutParams(dp(40), dp(40))
+                            )
+                        },
+                        LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            dp(42)
+                        )
+                    )
+                    addView(
+                        miniQuickListRecyclerView,
+                        LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            0,
+                            1f
+                        )
+                    )
+                },
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            )
+            miniQuickListGroupHintView = createOverlayGroupHintView()
+            addView(
+                miniQuickListGroupHintView,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.END or Gravity.CENTER_VERTICAL
+                ).apply {
+                    rightMargin = dp(8)
+                }
+            )
+        }
+        miniQuickListOverlayView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            clipChildren = false
+            clipToPadding = false
+            addView(
+                miniQuickListContentCardView,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    dp(296)
+                )
+            )
+            addView(
+                miniQuickListTabsCardView,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    dp(52)
+                ).apply {
+                    topMargin = dp(10)
+                }
+            )
+        }
         val miniBodyHost = FrameLayout(this).apply {
             clipChildren = false
             clipToPadding = false
@@ -3307,6 +3600,13 @@ class FloatingOverlayService : Service() {
             )
             addView(
                 miniSoundboardBody,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+            addView(
+                miniQuickListOverlayView,
                 FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
@@ -3644,7 +3944,23 @@ class FloatingOverlayService : Service() {
         miniGroupIconView = null
         miniGroupPrevButtonView = null
         miniGroupNextButtonView = null
+        miniQuickGroupHintHideJob?.cancel()
+        miniQuickGroupHintHideJob = null
+        miniQuickGroupHintView = null
         miniQuickCollapseButton = null
+        miniQuickListOverlayView = null
+        miniQuickListContentCardView = null
+        miniQuickListRecyclerView = null
+        miniQuickListAdapter = null
+        miniQuickListTabsCardView = null
+        miniQuickListTabsContainer = null
+        miniQuickListTabsScrollHost = null
+        miniQuickListTabsVerticalLayout = null
+        miniQuickListLayoutButtonView = null
+        miniQuickListGroupHintHideJob?.cancel()
+        miniQuickListGroupHintHideJob = null
+        miniQuickListGroupHintView = null
+        miniQuickListSelectedGroupId = null
         miniQuickCardBody = null
         miniQuickCardPreviewContainer = null
         miniQuickCardIndicatorContainer = null
@@ -3661,6 +3977,9 @@ class FloatingOverlayService : Service() {
         miniSoundboardTabsScrollHost = null
         miniSoundboardTabsVerticalLayout = null
         miniSoundboardLayoutButtonView = null
+        miniSoundboardGroupHintHideJob?.cancel()
+        miniSoundboardGroupHintHideJob = null
+        miniSoundboardGroupHintView = null
         miniPreviewOverlay = null
         miniPreviewHost = null
         miniActionFab = null
@@ -4238,7 +4557,48 @@ class FloatingOverlayService : Service() {
     }
 
     private fun togglePanel() {
+        ensureWindows()
+        reconcileExpandedWindowState("fab_toggle")
         if (panelVisible) hidePanel() else showPanel()
+    }
+
+    private fun isExpandedWindowActuallyVisible(root: View?, content: View?): Boolean {
+        return root?.isAttachedToWindow == true &&
+            root.visibility == View.VISIBLE &&
+            content?.visibility == View.VISIBLE
+    }
+
+    private fun reconcileExpandedWindowState(reason: String) {
+        val actualPanelVisible = isExpandedWindowActuallyVisible(panelRoot, panelContent)
+        val actualMiniVisible = isExpandedWindowActuallyVisible(miniRoot, miniContent)
+        if (panelVisible && !actualPanelVisible) {
+            AppLogger.w("FloatingOverlayService.reconcile stale panelVisible reason=$reason")
+            panelVisible = false
+            panelRoot?.visibility = View.GONE
+            panelContent?.animate()?.cancel()
+            panelContent?.alpha = 1f
+            panelContent?.translationY = 0f
+            panelContent?.visibility = View.GONE
+        }
+        if (miniVisible && !actualMiniVisible) {
+            AppLogger.w("FloatingOverlayService.reconcile stale miniVisible reason=$reason")
+            miniVisible = false
+            miniQuickListOverlayView?.visibility = View.GONE
+            miniRoot?.visibility = View.GONE
+            miniContent?.animate()?.cancel()
+            miniContent?.alpha = 1f
+            miniContent?.translationY = 0f
+            miniContent?.visibility = View.GONE
+        }
+        if (!panelVisible && actualPanelVisible) {
+            AppLogger.w("FloatingOverlayService.reconcile stray panel window reason=$reason")
+            forceHidePanelWindow("reconcile_$reason")
+        }
+        if (!miniVisible && actualMiniVisible) {
+            AppLogger.w("FloatingOverlayService.reconcile stray mini window reason=$reason")
+            forceHideMiniWindow("reconcile_$reason")
+        }
+        updateFabTouchProxyLayout()
     }
 
     private fun showPanel() {
@@ -4365,6 +4725,7 @@ class FloatingOverlayService : Service() {
             saveMiniQuickItemsScrollState()
         }
         closeMiniPreview()
+        miniQuickListOverlayView?.visibility = View.GONE
         miniVisible = false
         animateOverlayOut(miniContent) {
             forceHideMiniWindow("animation_end")
@@ -4393,6 +4754,7 @@ class FloatingOverlayService : Service() {
         miniContent?.alpha = 1f
         miniContent?.translationY = 0f
         miniContent?.visibility = View.GONE
+        miniQuickListOverlayView?.visibility = View.GONE
         miniRoot?.visibility = View.GONE
         miniVisible = false
         updateFabUi()
@@ -4401,19 +4763,69 @@ class FloatingOverlayService : Service() {
 
     private fun returnFromMiniToPanel() {
         closeMiniPreview()
+        miniQuickListOverlayView?.visibility = View.GONE
         showPanel()
     }
 
-    private fun refreshMiniModeUi() {
-        miniSubtitleBody?.visibility = if (miniMode == MiniOverlayMode.Subtitle) View.VISIBLE else View.GONE
+    private fun refreshMiniModeUi(animateSubtitleBody: Boolean = false) {
+        if (miniMode != MiniOverlayMode.Subtitle) {
+            miniQuickListOverlayView?.visibility = View.GONE
+        }
+        val quickListOverlayVisible =
+            miniMode == MiniOverlayMode.Subtitle &&
+                miniQuickListOverlayView?.visibility == View.VISIBLE
+        val subtitleBodyVisible = miniMode == MiniOverlayMode.Subtitle && !quickListOverlayVisible
+        setMiniSubtitleBodyVisibility(subtitleBodyVisible, animate = animateSubtitleBody)
         miniQuickCardBody?.visibility = if (miniMode == MiniOverlayMode.QuickCard) View.VISIBLE else View.GONE
         miniSoundboardBody?.visibility = if (miniMode == MiniOverlayMode.Soundboard) View.VISIBLE else View.GONE
+        if (miniQuickListOverlayView?.visibility == View.VISIBLE) {
+            miniQuickListOverlayView?.bringToFront()
+        }
         miniOpenButtonView?.contentDescription =
             when (miniMode) {
                 MiniOverlayMode.Subtitle -> "打开快捷字幕"
                 MiniOverlayMode.QuickCard -> "打开快捷名片"
                 MiniOverlayMode.Soundboard -> "打开音效板"
             }
+    }
+
+    private fun setMiniSubtitleBodyVisibility(visible: Boolean, animate: Boolean) {
+        val body = miniSubtitleBody ?: return
+        body.animate().cancel()
+        if (!animate) {
+            body.alpha = 1f
+            body.translationY = 0f
+            body.visibility = if (visible) View.VISIBLE else View.GONE
+            return
+        }
+        if (visible) {
+            if (body.visibility != View.VISIBLE) {
+                body.alpha = 0f
+                body.translationY = dp(10).toFloat()
+                body.visibility = View.VISIBLE
+            }
+            body.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(180L)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
+        } else {
+            if (body.visibility != View.VISIBLE) return
+            body.animate()
+                .alpha(0f)
+                .translationY(dp(10).toFloat())
+                .setDuration(150L)
+                .setInterpolator(DecelerateInterpolator())
+                .withEndAction {
+                    if (miniQuickListOverlayView?.visibility == View.VISIBLE || miniMode != MiniOverlayMode.Subtitle) {
+                        body.visibility = View.GONE
+                    }
+                    body.alpha = 1f
+                    body.translationY = 0f
+                }
+                .start()
+        }
     }
 
     private fun animateOverlayIn(view: View?, fromBottom: Boolean) {
@@ -4910,6 +5322,9 @@ class FloatingOverlayService : Service() {
         }
         refreshMiniSubtitleLayoutMetrics()
         refreshMiniQuickCardLayoutMetrics()
+        if (miniQuickListOverlayView?.visibility == View.VISIBLE) {
+            refreshMiniQuickTextListOverlayUi()
+        }
     }
 
     private fun refreshMiniSubtitleLayoutMetrics() {
@@ -5137,6 +5552,30 @@ class FloatingOverlayService : Service() {
                     )
             }
         }
+        miniQuickGroupHintView?.let { hint ->
+            hint.layoutParams =
+                if (landscapePhone) {
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                    ).apply {
+                        bottomMargin = dp(8)
+                        leftMargin = dp(6)
+                        rightMargin = dp(6)
+                    }
+                } else {
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        Gravity.END or Gravity.CENTER_VERTICAL
+                    ).apply {
+                        rightMargin = dp(8)
+                        leftMargin = dp(8)
+                    }
+                }
+            hint.bringToFront()
+        }
         miniQuickRow?.requestLayout()
         miniSubtitleCardView?.requestLayout()
         miniSubtitleBody?.requestLayout()
@@ -5212,6 +5651,17 @@ class FloatingOverlayService : Service() {
         quickSubtitleFontSizeSp = overlayFontSize ?: sharedFontFallback
         syncBluetoothMediaTitleToCommittedQuickSubtitle()
         quickSubtitleConfigLoaded = true
+    }
+
+    private fun applyRealtimeQuickSubtitleConfig(raw: String) {
+        val preservedOverlayFontSize = quickSubtitleFontSizeSp
+        runCatching { parseQuickSubtitleConfig(raw) }
+            .onFailure { AppLogger.e("FloatingOverlayService.applyRealtimeQuickSubtitleConfig failed", it) }
+            .onSuccess {
+                quickSubtitleFontSizeSp = preservedOverlayFontSize.coerceIn(28f, 96f)
+                quickSubtitleConfigLoaded = true
+                refreshQuickSubtitleUi()
+            }
     }
 
     private fun syncBluetoothMediaTitleToCommittedQuickSubtitle(
@@ -5469,7 +5919,309 @@ class FloatingOverlayService : Service() {
             ?: defaultQuickSubtitleGroups().first()
     }
 
-    private fun shiftQuickSubtitleGroup(delta: Int) {
+    private fun selectedMiniQuickTextListGroup(): QuickSubtitleGroupConfig {
+        val selectedId = miniQuickListSelectedGroupId
+        val selected = quickSubtitleGroups.firstOrNull { it.id == selectedId }
+            ?: quickSubtitleGroups.firstOrNull { it.id == currentMiniQuickSubtitleGroupId() }
+            ?: quickSubtitleGroups.firstOrNull()
+            ?: defaultQuickSubtitleGroups().first()
+        miniQuickListSelectedGroupId = selected.id
+        return selected
+    }
+
+    private fun showMiniQuickTextListOverlay() {
+        if (miniMode != MiniOverlayMode.Subtitle) return
+        if (quickSubtitleGroups.isEmpty()) return
+        saveMiniQuickItemsScrollState()
+        miniQuickListSelectedGroupId = currentMiniQuickSubtitleGroupId()
+        refreshMiniQuickTextListOverlayUi()
+        setMiniSubtitleBodyVisibility(false, animate = true)
+        miniQuickListOverlayView?.let { overlay ->
+            overlay.bringToFront()
+            if (overlay.visibility == View.VISIBLE) {
+                overlay.alpha = 1f
+                overlay.translationY = 0f
+            } else {
+                animateOverlayIn(overlay, fromBottom = false)
+            }
+        }
+        updateMiniPanelPosition()
+    }
+
+    private fun hideMiniQuickTextListOverlay() {
+        val overlay = miniQuickListOverlayView ?: return
+        if (overlay.visibility != View.VISIBLE) return
+        animateOverlayOut(overlay) {
+            refreshMiniModeUi(animateSubtitleBody = true)
+            updateMiniPanelPosition()
+        }
+    }
+
+    private fun refreshMiniQuickTextListOverlayUi() {
+        val recycler = miniQuickListRecyclerView ?: return
+        val adapter = miniQuickListAdapter ?: return
+        val group = selectedMiniQuickTextListGroup()
+        ensureMiniQuickTextListLayoutManager(recycler)
+        adapter.submit(group.items, miniQuickListGridMode)
+        miniQuickListLayoutButtonView?.apply {
+            text = if (miniQuickListGridMode) "grid_view" else "view_list"
+            contentDescription = if (miniQuickListGridMode) "当前宫格，点击切换列表" else "当前列表，点击切换宫格"
+        }
+        refreshMiniQuickTextListTabs()
+        refreshMiniQuickTextListOverlayLayoutMetrics()
+        miniQuickListOverlayView?.requestLayout()
+        recycler.post {
+            ensureMiniQuickTextListLayoutManager(recycler)
+            adapter.submit(group.items, miniQuickListGridMode)
+        }
+    }
+
+    private fun ensureMiniQuickTextListLayoutManager(recycler: RecyclerView) {
+        val grid = miniQuickListGridMode
+        val contentWidth =
+            (miniQuickListContentCardView?.width ?: 0)
+                .takeIf { it > 0 }
+                ?: overlayContentWidthPx(phoneMaxDp = 360, tabletMaxDp = 420)
+        val spanCount = (contentWidth / dp(136)).coerceIn(2, if (isPhoneLandscapeUi()) 4 else 3)
+        val current = recycler.layoutManager
+        val matches =
+            if (grid) {
+                current is GridLayoutManager &&
+                    current.orientation == RecyclerView.VERTICAL &&
+                    current.spanCount == spanCount
+            } else {
+                current is LinearLayoutManager &&
+                    current !is GridLayoutManager &&
+                    current.orientation == RecyclerView.VERTICAL
+            }
+        if (matches) return
+        recycler.layoutManager =
+            if (grid) {
+                GridLayoutManager(this, spanCount)
+            } else {
+                LinearLayoutManager(this, RecyclerView.VERTICAL, false)
+            }
+    }
+
+    private fun refreshMiniQuickTextListTabs() {
+        val container = miniQuickListTabsContainer ?: return
+        val scrollHost = miniQuickListTabsScrollHost
+        val savedScrollX = scrollHost?.scrollX ?: 0
+        val savedScrollY = scrollHost?.scrollY ?: 0
+        val verticalTabs = isPhoneLandscapeUi()
+        container.removeAllViews()
+        quickSubtitleGroups.forEach { group ->
+            val selected = group.id == miniQuickListSelectedGroupId
+            val tab = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                clipChildren = true
+                clipToPadding = true
+                background =
+                    if (selected) {
+                        roundedRectDrawable(
+                            overlayRadiusDp,
+                            ColorUtils.setAlphaComponent(overlayPrimaryColor(), if (overlayDarkTheme) 64 else 42)
+                        )
+                    } else {
+                        roundedRectDrawable(overlayRadiusDp, Color.TRANSPARENT)
+                    }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    foreground = selectableDrawable()
+                }
+                setPadding(if (verticalTabs) dp(6) else dp(10), 0, if (verticalTabs) dp(6) else dp(10), 0)
+                setOnClickListener {
+                    performOverlayKeyHaptic(this)
+                    if (group.id != miniQuickListSelectedGroupId) {
+                        saveMiniQuickItemsScrollState()
+                        miniQuickSubtitleSelectedGroupId = group.id
+                        if (verticalTabs) {
+                            showMiniQuickListGroupHint(group.title)
+                        }
+                    }
+                    miniQuickListSelectedGroupId = group.id
+                    refreshQuickSubtitleUi()
+                }
+                addView(symbolTextView(group.icon, 20f, overlayOnSurfaceColor()))
+                if (!verticalTabs) {
+                    addView(spaceView(dp(6), 1))
+                    addView(
+                        TextView(this@FloatingOverlayService).apply {
+                            text = group.title.ifBlank { "未命名分组" }
+                            setTextColor(overlayOnSurfaceColor())
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                            maxLines = 1
+                            ellipsize = TextUtils.TruncateAt.END
+                            includeFontPadding = false
+                        },
+                        LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        )
+                    )
+                }
+            }
+            container.addView(
+                tab,
+                if (verticalTabs) {
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)).apply {
+                        bottomMargin = dp(2)
+                    }
+                } else {
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)).apply {
+                        rightMargin = dp(2)
+                    }
+                }
+            )
+        }
+        scrollHost?.post {
+            if (verticalTabs) {
+                scrollHost.scrollTo(0, savedScrollY)
+            } else {
+                scrollHost.scrollTo(savedScrollX, 0)
+            }
+        }
+    }
+
+    private fun refreshMiniQuickTextListOverlayLayoutMetrics() {
+        val overlay = miniQuickListOverlayView ?: return
+        val contentCard = miniQuickListContentCardView ?: return
+        val tabsCard = miniQuickListTabsCardView ?: return
+        val landscapePhone = isPhoneLandscapeUi()
+        configureMiniQuickTextListTabsCard(landscapePhone)
+        val contentHeight = miniQuickTextListContentHeight()
+        overlay.removeAllViews()
+        overlay.orientation = if (landscapePhone) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        overlay.gravity = Gravity.NO_GRAVITY
+        if (landscapePhone) {
+            reparentView(
+                contentCard,
+                overlay,
+                LinearLayout.LayoutParams(0, contentHeight, 1f)
+            )
+            reparentView(
+                tabsCard,
+                overlay,
+                LinearLayout.LayoutParams(dp(58), contentHeight).apply {
+                    leftMargin = dp(10)
+                }
+            )
+        } else {
+            reparentView(
+                contentCard,
+                overlay,
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, contentHeight)
+            )
+            reparentView(
+                tabsCard,
+                overlay,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    dp(52)
+                ).apply {
+                    topMargin = dp(10)
+                }
+            )
+        }
+    }
+
+    private fun miniQuickTextListContentHeight(): Int {
+        return if (isPhoneLandscapeUi()) {
+            landscapeOverlayContentHeight() + dp(72)
+        } else {
+            dp(296)
+        }
+    }
+
+    private fun configureMiniQuickTextListTabsCard(vertical: Boolean) {
+        val tabsCard = miniQuickListTabsCardView ?: return
+        val tabsContainer = miniQuickListTabsContainer ?: return
+        val layoutButton = miniQuickListLayoutButtonView ?: return
+        if (
+            miniQuickListTabsVerticalLayout == vertical &&
+            tabsCard.childCount > 0 &&
+            tabsContainer.parent != null &&
+            layoutButton.parent != null
+        ) {
+            tabsCard.orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            tabsContainer.orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            return
+        }
+        tabsCard.removeAllViews()
+        (tabsContainer.parent as? ViewGroup)?.removeView(tabsContainer)
+        (layoutButton.parent as? ViewGroup)?.removeView(layoutButton)
+        miniQuickListTabsVerticalLayout = vertical
+        miniQuickListTabsScrollHost = null
+        tabsCard.orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        tabsCard.gravity = Gravity.CENTER
+        tabsContainer.orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        tabsContainer.gravity = if (vertical) Gravity.CENTER_HORIZONTAL else Gravity.CENTER_VERTICAL
+        if (vertical) {
+            tabsCard.addView(
+                ScrollView(this).apply {
+                    miniQuickListTabsScrollHost = this
+                    isVerticalScrollBarEnabled = false
+                    overScrollMode = View.OVER_SCROLL_NEVER
+                    clipChildren = true
+                    clipToPadding = true
+                    addView(
+                        tabsContainer,
+                        ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        )
+                    )
+                },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+            )
+            tabsCard.addView(
+                View(this).apply {
+                    setBackgroundColor(ColorUtils.setAlphaComponent(overlayOutlineColor(), if (overlayDarkTheme) 112 else 92))
+                },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                    topMargin = dp(4)
+                    bottomMargin = dp(4)
+                }
+            )
+            tabsCard.addView(
+                layoutButton,
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44))
+            )
+        } else {
+            tabsCard.addView(
+                HorizontalScrollView(this).apply {
+                    miniQuickListTabsScrollHost = this
+                    isHorizontalScrollBarEnabled = false
+                    overScrollMode = View.OVER_SCROLL_NEVER
+                    clipChildren = true
+                    clipToPadding = true
+                    addView(
+                        tabsContainer,
+                        ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                    )
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+            )
+            tabsCard.addView(
+                View(this).apply {
+                    setBackgroundColor(ColorUtils.setAlphaComponent(overlayOutlineColor(), if (overlayDarkTheme) 112 else 92))
+                },
+                LinearLayout.LayoutParams(dp(1), dp(34)).apply {
+                    leftMargin = dp(4)
+                    rightMargin = dp(4)
+                }
+            )
+            tabsCard.addView(
+                layoutButton,
+                LinearLayout.LayoutParams(dp(44), ViewGroup.LayoutParams.MATCH_PARENT)
+            )
+        }
+    }
+
+    private fun shiftQuickSubtitleGroup(delta: Int, holdHintUntilRelease: Boolean = false) {
         if (quickSubtitleGroups.isEmpty()) return
         saveMiniQuickItemsScrollState()
         val currentGroupId = currentMiniQuickSubtitleGroupId()
@@ -5478,7 +6230,9 @@ class FloatingOverlayService : Service() {
         val nextIndex = (currentIndex + delta).floorMod(quickSubtitleGroups.size)
         if (nextIndex == currentIndex) return
         performOverlayKeyHaptic(miniQuickSwitcherView ?: miniGroupIconView)
-        miniQuickSubtitleSelectedGroupId = quickSubtitleGroups[nextIndex].id
+        val nextGroup = quickSubtitleGroups[nextIndex]
+        miniQuickSubtitleSelectedGroupId = nextGroup.id
+        showMiniQuickGroupHint(nextGroup.title, holdUntilRelease = holdHintUntilRelease)
         refreshQuickSubtitleUi()
     }
 
@@ -5553,6 +6307,9 @@ class FloatingOverlayService : Service() {
         miniQuickItemsAdapter?.submitItems(group.items)
         refreshMiniSubtitleLayoutMetrics()
         restoreMiniQuickItemsScrollState(group.id)
+        if (miniQuickListOverlayView?.visibility == View.VISIBLE) {
+            refreshMiniQuickTextListOverlayUi()
+        }
         refreshMiniPreviewUi()
     }
 
@@ -5670,6 +6427,129 @@ class FloatingOverlayService : Service() {
             .start()
     }
 
+    private fun createOverlayGroupHintView(): TextView =
+        TextView(this).apply {
+            visibility = View.GONE
+            alpha = 0f
+            background = roundedRectDrawable(overlayRadiusDp, overlayCardColor())
+            elevation = dp(8).toFloat()
+            setTextColor(overlayOnSurfaceColor())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+            typeface = Typeface.DEFAULT_BOLD
+            includeFontPadding = false
+            gravity = Gravity.CENTER
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            minWidth = dp(96)
+            maxWidth = dp(220)
+            isClickable = false
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+
+    private fun normalizedGroupHintTitle(title: String): String =
+        title.trim().ifBlank { "未命名分组" }
+
+    private fun showOverlayGroupHint(
+        view: TextView?,
+        title: String,
+        hideJob: Job?,
+        setHideJob: (Job?) -> Unit,
+        holdUntilRelease: Boolean = false
+    ) {
+        val target = view ?: return
+        hideJob?.cancel()
+        target.text = normalizedGroupHintTitle(title)
+        target.visibility = View.VISIBLE
+        target.bringToFront()
+        target.animate().cancel()
+        target.animate().setListener(null)
+        target.animate()
+            .alpha(1f)
+            .setDuration(140L)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+        if (!holdUntilRelease) {
+            setHideJob(scope.launch {
+                delay(900L)
+                hideOverlayGroupHint(target)
+                setHideJob(null)
+            })
+        } else {
+            setHideJob(null)
+        }
+    }
+
+    private fun releaseOverlayGroupHint(
+        view: TextView?,
+        hideJob: Job?,
+        setHideJob: (Job?) -> Unit
+    ) {
+        val target = view ?: return
+        hideJob?.cancel()
+        setHideJob(scope.launch {
+            delay(320L)
+            hideOverlayGroupHint(target)
+            setHideJob(null)
+        })
+    }
+
+    private fun hideOverlayGroupHint(view: TextView?) {
+        val target = view ?: return
+        target.animate().cancel()
+        target.animate()
+            .alpha(0f)
+            .setDuration(180L)
+            .setInterpolator(DecelerateInterpolator())
+            .setListener(
+                object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) {
+                        target.visibility = View.GONE
+                        target.animate().setListener(null)
+                    }
+                }
+            )
+            .start()
+    }
+
+    private fun showMiniQuickGroupHint(title: String, holdUntilRelease: Boolean = false) {
+        showOverlayGroupHint(
+            view = miniQuickGroupHintView,
+            title = title,
+            hideJob = miniQuickGroupHintHideJob,
+            setHideJob = { miniQuickGroupHintHideJob = it },
+            holdUntilRelease = holdUntilRelease
+        )
+    }
+
+    private fun releaseMiniQuickGroupHint() {
+        releaseOverlayGroupHint(
+            view = miniQuickGroupHintView,
+            hideJob = miniQuickGroupHintHideJob,
+            setHideJob = { miniQuickGroupHintHideJob = it }
+        )
+    }
+
+    private fun showMiniQuickListGroupHint(title: String) {
+        if (!isPhoneLandscapeUi()) return
+        showOverlayGroupHint(
+            view = miniQuickListGroupHintView,
+            title = title,
+            hideJob = miniQuickListGroupHintHideJob,
+            setHideJob = { miniQuickListGroupHintHideJob = it }
+        )
+    }
+
+    private fun showMiniSoundboardGroupHint(title: String) {
+        if (!isPhoneLandscapeUi()) return
+        showOverlayGroupHint(
+            view = miniSoundboardGroupHintView,
+            title = title,
+            hideJob = miniSoundboardGroupHintHideJob,
+            setHideJob = { miniSoundboardGroupHintHideJob = it }
+        )
+    }
+
     private fun refreshMiniQuickCardIndicators() {
         val container = miniQuickCardIndicatorContainer ?: return
         val vertical = isPhoneLandscapeUi()
@@ -5734,7 +6614,7 @@ class FloatingOverlayService : Service() {
                         val currentPrimary = if (horizontalDrag) event.rawX else event.rawY
                         val delta = currentPrimary - lastPrimary
                         if (abs(delta) >= threshold) {
-                            shiftQuickSubtitleGroup(if (delta > 0f) 1 else -1)
+                            shiftQuickSubtitleGroup(if (delta > 0f) 1 else -1, holdHintUntilRelease = true)
                             lastPrimary = currentPrimary
                             dragged = true
                         }
@@ -5744,6 +6624,9 @@ class FloatingOverlayService : Service() {
                     MotionEvent.ACTION_UP,
                     MotionEvent.ACTION_CANCEL -> {
                         requestDisallowIntercept(v, false)
+                        if (dragged) {
+                            releaseMiniQuickGroupHint()
+                        }
                         if (event.actionMasked == MotionEvent.ACTION_UP && !dragged) {
                             v.performClick()
                         }
@@ -5971,7 +6854,10 @@ class FloatingOverlayService : Service() {
     }
 
     private fun selectMiniSoundboardGroup(groupId: Long) {
-        if (soundboardConfig.groups.none { it.id == groupId }) return
+        val targetGroup = soundboardConfig.groups.firstOrNull { it.id == groupId } ?: return
+        if (targetGroup.id != miniSoundboardSelectedGroupId) {
+            showMiniSoundboardGroupHint(targetGroup.title)
+        }
         miniSoundboardSelectedGroupId = groupId
         soundboardConfig = soundboardConfig.copy(selectedGroupId = groupId)
         SoundboardManager.updateCachedConfig(soundboardConfig)
@@ -6143,6 +7029,17 @@ class FloatingOverlayService : Service() {
                     topMargin = dp(10)
                 }
             )
+        }
+        miniSoundboardGroupHintView?.let { hint ->
+            hint.layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.END or Gravity.CENTER_VERTICAL
+            ).apply {
+                rightMargin = dp(8)
+                leftMargin = dp(8)
+            }
+            hint.bringToFront()
         }
     }
 
