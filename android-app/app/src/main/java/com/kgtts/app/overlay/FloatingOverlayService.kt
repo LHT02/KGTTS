@@ -822,7 +822,7 @@ class FloatingOverlayService : Service() {
             }
             val root = FrameLayout(parent.context).apply {
                 background = roundedRectDrawable(overlayRadiusDp, overlayCardColor())
-                elevation = dp(3).toFloat()
+                elevation = dp(4).toFloat()
                 clipChildren = true
                 clipToPadding = true
                 isClickable = true
@@ -1429,6 +1429,7 @@ class FloatingOverlayService : Service() {
     private fun healFabInteractionState(reason: String) {
         val root = fabRoot ?: return
         if (!settings.floatingOverlayEnabled) return
+        reconcileExpandedWindowState("heal_$reason")
         val now = SystemClock.uptimeMillis()
         if (draggingFab && now - lastFabTouchUptime > 3000L) {
             AppLogger.w("FloatingOverlayService.heal stale fab drag reason=$reason")
@@ -2146,13 +2147,20 @@ class FloatingOverlayService : Service() {
     @Suppress("DEPRECATION")
     @SuppressLint("ClickableViewAccessibility")
     private fun ensureWindows() {
-        if (
+        val hasAllWindows =
             fabRoot != null &&
-            fabTouchProxy != null &&
-            panelRoot != null &&
-            miniRoot != null &&
-            confirmOverlay != null
+                fabTouchProxy != null &&
+                panelRoot != null &&
+                miniRoot != null &&
+                confirmOverlay != null
+        if (
+            hasAllWindows &&
+            listOf(fabRoot, fabTouchProxy, panelRoot, miniRoot, confirmOverlay)
+                .all { it?.isAttachedToWindow == true }
         ) return
+        if (hasAllWindows) {
+            AppLogger.w("FloatingOverlayService.ensureWindows rebuild detached window")
+        }
         if (fabRoot != null || fabTouchProxy != null || panelRoot != null || miniRoot != null || confirmOverlay != null) {
             removeWindows()
         }
@@ -3560,7 +3568,7 @@ class FloatingOverlayService : Service() {
                 miniQuickListContentCardView,
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    dp(260)
+                    dp(296)
                 )
             )
             addView(
@@ -4549,7 +4557,48 @@ class FloatingOverlayService : Service() {
     }
 
     private fun togglePanel() {
+        ensureWindows()
+        reconcileExpandedWindowState("fab_toggle")
         if (panelVisible) hidePanel() else showPanel()
+    }
+
+    private fun isExpandedWindowActuallyVisible(root: View?, content: View?): Boolean {
+        return root?.isAttachedToWindow == true &&
+            root.visibility == View.VISIBLE &&
+            content?.visibility == View.VISIBLE
+    }
+
+    private fun reconcileExpandedWindowState(reason: String) {
+        val actualPanelVisible = isExpandedWindowActuallyVisible(panelRoot, panelContent)
+        val actualMiniVisible = isExpandedWindowActuallyVisible(miniRoot, miniContent)
+        if (panelVisible && !actualPanelVisible) {
+            AppLogger.w("FloatingOverlayService.reconcile stale panelVisible reason=$reason")
+            panelVisible = false
+            panelRoot?.visibility = View.GONE
+            panelContent?.animate()?.cancel()
+            panelContent?.alpha = 1f
+            panelContent?.translationY = 0f
+            panelContent?.visibility = View.GONE
+        }
+        if (miniVisible && !actualMiniVisible) {
+            AppLogger.w("FloatingOverlayService.reconcile stale miniVisible reason=$reason")
+            miniVisible = false
+            miniQuickListOverlayView?.visibility = View.GONE
+            miniRoot?.visibility = View.GONE
+            miniContent?.animate()?.cancel()
+            miniContent?.alpha = 1f
+            miniContent?.translationY = 0f
+            miniContent?.visibility = View.GONE
+        }
+        if (!panelVisible && actualPanelVisible) {
+            AppLogger.w("FloatingOverlayService.reconcile stray panel window reason=$reason")
+            forceHidePanelWindow("reconcile_$reason")
+        }
+        if (!miniVisible && actualMiniVisible) {
+            AppLogger.w("FloatingOverlayService.reconcile stray mini window reason=$reason")
+            forceHideMiniWindow("reconcile_$reason")
+        }
+        updateFabTouchProxyLayout()
     }
 
     private fun showPanel() {
@@ -4718,11 +4767,15 @@ class FloatingOverlayService : Service() {
         showPanel()
     }
 
-    private fun refreshMiniModeUi() {
+    private fun refreshMiniModeUi(animateSubtitleBody: Boolean = false) {
         if (miniMode != MiniOverlayMode.Subtitle) {
             miniQuickListOverlayView?.visibility = View.GONE
         }
-        miniSubtitleBody?.visibility = if (miniMode == MiniOverlayMode.Subtitle) View.VISIBLE else View.GONE
+        val quickListOverlayVisible =
+            miniMode == MiniOverlayMode.Subtitle &&
+                miniQuickListOverlayView?.visibility == View.VISIBLE
+        val subtitleBodyVisible = miniMode == MiniOverlayMode.Subtitle && !quickListOverlayVisible
+        setMiniSubtitleBodyVisibility(subtitleBodyVisible, animate = animateSubtitleBody)
         miniQuickCardBody?.visibility = if (miniMode == MiniOverlayMode.QuickCard) View.VISIBLE else View.GONE
         miniSoundboardBody?.visibility = if (miniMode == MiniOverlayMode.Soundboard) View.VISIBLE else View.GONE
         if (miniQuickListOverlayView?.visibility == View.VISIBLE) {
@@ -4734,6 +4787,45 @@ class FloatingOverlayService : Service() {
                 MiniOverlayMode.QuickCard -> "打开快捷名片"
                 MiniOverlayMode.Soundboard -> "打开音效板"
             }
+    }
+
+    private fun setMiniSubtitleBodyVisibility(visible: Boolean, animate: Boolean) {
+        val body = miniSubtitleBody ?: return
+        body.animate().cancel()
+        if (!animate) {
+            body.alpha = 1f
+            body.translationY = 0f
+            body.visibility = if (visible) View.VISIBLE else View.GONE
+            return
+        }
+        if (visible) {
+            if (body.visibility != View.VISIBLE) {
+                body.alpha = 0f
+                body.translationY = dp(10).toFloat()
+                body.visibility = View.VISIBLE
+            }
+            body.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(180L)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
+        } else {
+            if (body.visibility != View.VISIBLE) return
+            body.animate()
+                .alpha(0f)
+                .translationY(dp(10).toFloat())
+                .setDuration(150L)
+                .setInterpolator(DecelerateInterpolator())
+                .withEndAction {
+                    if (miniQuickListOverlayView?.visibility == View.VISIBLE || miniMode != MiniOverlayMode.Subtitle) {
+                        body.visibility = View.GONE
+                    }
+                    body.alpha = 1f
+                    body.translationY = 0f
+                }
+                .start()
+        }
     }
 
     private fun animateOverlayIn(view: View?, fromBottom: Boolean) {
@@ -5843,6 +5935,7 @@ class FloatingOverlayService : Service() {
         saveMiniQuickItemsScrollState()
         miniQuickListSelectedGroupId = currentMiniQuickSubtitleGroupId()
         refreshMiniQuickTextListOverlayUi()
+        setMiniSubtitleBodyVisibility(false, animate = true)
         miniQuickListOverlayView?.let { overlay ->
             overlay.bringToFront()
             if (overlay.visibility == View.VISIBLE) {
@@ -5859,6 +5952,7 @@ class FloatingOverlayService : Service() {
         val overlay = miniQuickListOverlayView ?: return
         if (overlay.visibility != View.VISIBLE) return
         animateOverlayOut(overlay) {
+            refreshMiniModeUi(animateSubtitleBody = true)
             updateMiniPanelPosition()
         }
     }
@@ -5938,11 +6032,15 @@ class FloatingOverlayService : Service() {
                 setPadding(if (verticalTabs) dp(6) else dp(10), 0, if (verticalTabs) dp(6) else dp(10), 0)
                 setOnClickListener {
                     performOverlayKeyHaptic(this)
-                    if (verticalTabs && group.id != miniQuickListSelectedGroupId) {
-                        showMiniQuickListGroupHint(group.title)
+                    if (group.id != miniQuickListSelectedGroupId) {
+                        saveMiniQuickItemsScrollState()
+                        miniQuickSubtitleSelectedGroupId = group.id
+                        if (verticalTabs) {
+                            showMiniQuickListGroupHint(group.title)
+                        }
                     }
                     miniQuickListSelectedGroupId = group.id
-                    refreshMiniQuickTextListOverlayUi()
+                    refreshQuickSubtitleUi()
                 }
                 addView(symbolTextView(group.icon, 20f, overlayOnSurfaceColor()))
                 if (!verticalTabs) {
@@ -5991,7 +6089,7 @@ class FloatingOverlayService : Service() {
         val tabsCard = miniQuickListTabsCardView ?: return
         val landscapePhone = isPhoneLandscapeUi()
         configureMiniQuickTextListTabsCard(landscapePhone)
-        val contentHeight = if (landscapePhone) landscapeOverlayContentHeight() else dp(260)
+        val contentHeight = miniQuickTextListContentHeight()
         overlay.removeAllViews()
         overlay.orientation = if (landscapePhone) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
         overlay.gravity = Gravity.NO_GRAVITY
@@ -6024,6 +6122,14 @@ class FloatingOverlayService : Service() {
                     topMargin = dp(10)
                 }
             )
+        }
+    }
+
+    private fun miniQuickTextListContentHeight(): Int {
+        return if (isPhoneLandscapeUi()) {
+            landscapeOverlayContentHeight() + dp(72)
+        } else {
+            dp(296)
         }
     }
 

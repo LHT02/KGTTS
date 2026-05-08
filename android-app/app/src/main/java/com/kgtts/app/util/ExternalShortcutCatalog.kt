@@ -10,6 +10,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Process
 import com.lhtstudio.kigtts.app.data.UserPrefs
+import com.lhtstudio.kigtts.app.overlay.OverlayBridge
+import com.lhtstudio.kigtts.app.service.VolumeHotkeyAccessibilityService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -26,6 +28,7 @@ data class ExternalShortcutChoice(
 
 object ExternalShortcutCatalog {
     const val APP_LAUNCH_SHORTCUT_ID = "__app_launch__"
+    const val QQ_ACCESSIBILITY_SCANNER_SHORTCUT_ID = "__qq_scanner_accessibility__"
 
     private data class ConfiguredAppShortcut(
         val packageName: String,
@@ -172,6 +175,13 @@ object ExternalShortcutCatalog {
             launchApp(context, choice.packageName, choice.className)
             return
         }
+        if (
+            choice.packageName == QqScannerSupport.QQ_PACKAGE_NAME &&
+            choice.shortcutId == QQ_ACCESSIBILITY_SCANNER_SHORTCUT_ID
+        ) {
+            launchQqAccessibilityScanner(context)
+            return
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
             val launcherApps = context.getSystemService(LauncherApps::class.java)
             if (launcherApps != null) {
@@ -236,6 +246,18 @@ object ExternalShortcutCatalog {
                 appLabel = app.label,
                 shortcutId = APP_LAUNCH_SHORTCUT_ID,
                 shortcutTitle = "打开应用"
+            )
+        }
+        if (
+            app.packageName == QqScannerSupport.QQ_PACKAGE_NAME &&
+            seen.add(shortcutKey(app.packageName, QQ_ACCESSIBILITY_SCANNER_SHORTCUT_ID))
+        ) {
+            result += ExternalShortcutChoice(
+                packageName = app.packageName,
+                className = app.className,
+                appLabel = app.label,
+                shortcutId = QQ_ACCESSIBILITY_SCANNER_SHORTCUT_ID,
+                shortcutTitle = "扫一扫（无障碍）"
             )
         }
         queryLauncherShortcuts(context, app).forEach { info ->
@@ -471,6 +493,23 @@ object ExternalShortcutCatalog {
         spec.booleanExtras.forEach { (key, value) -> intent.putExtra(key, value) }
         spec.stringExtras.forEach { (key, value) -> intent.putExtra(key, value) }
         return intent
+    }
+
+    private fun launchQqAccessibilityScanner(context: Context) {
+        if (!VolumeHotkeyAccessibilityService.isEnabled(context)) {
+            runCatching {
+                context.startActivity(OverlayBridge.buildOpenAccessibilityGuideIntent(context))
+            }.onFailure {
+                AppLogger.e("ExternalShortcutCatalog.openAccessibilityGuide failed", it)
+            }
+            return
+        }
+        if (VolumeHotkeyAccessibilityService.requestOpenQqScanner(context)) {
+            return
+        }
+        if (!QqScannerSupport.launchQq(context)) {
+            launchApp(context, QqScannerSupport.QQ_PACKAGE_NAME, QqScannerSupport.QQ_LAUNCHER_ACTIVITY)
+        }
     }
 
     private fun launchApp(context: Context, packageName: String, className: String) {

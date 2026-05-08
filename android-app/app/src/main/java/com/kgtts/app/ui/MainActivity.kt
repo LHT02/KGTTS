@@ -2821,8 +2821,8 @@ class MainViewModel(
 
     fun openSystemTtsSetup(context: Context) {
         val intents = listOf(
-            android.content.Intent(android.speech.tts.TextToSpeech.Engine.ACTION_CHECK_TTS_DATA),
-            android.content.Intent("com.android.settings.TTS_SETTINGS")
+            android.content.Intent("com.android.settings.TTS_SETTINGS"),
+            android.content.Intent(android.speech.tts.TextToSpeech.Engine.ACTION_CHECK_TTS_DATA)
         )
         for (intent in intents) {
             val resolved = runCatching {
@@ -15722,7 +15722,7 @@ private fun QuickSubtitlePopupItem(
             .height(if (grid) 76.dp else 64.dp)
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(UiTokens.Radius),
-        backgroundColor = md2ElevatedCardContainerColor(UiTokens.MenuElevation),
+        backgroundColor = md2CardContainerColor(),
         elevation = UiTokens.CardElevation
     ) {
         Box(
@@ -15875,6 +15875,7 @@ private fun QuickSubtitleListDialog(
     initialGroupIndex: Int,
     layoutMode: QuickSubtitleListPopupLayout,
     onLayoutModeChange: (QuickSubtitleListPopupLayout) -> Unit,
+    onSelectGroup: (Int) -> Unit,
     onDismiss: () -> Unit,
     onSubmit: (String) -> Unit
 ) {
@@ -15893,7 +15894,7 @@ private fun QuickSubtitleListDialog(
             modifier = modifier,
             shape = RoundedCornerShape(UiTokens.Radius),
             backgroundColor = md2CardContainerColor(),
-            elevation = UiTokens.MenuElevation
+            elevation = UiTokens.CardElevation
         ) {
             if (currentItems.isEmpty()) {
                 Box(
@@ -15998,6 +15999,7 @@ private fun QuickSubtitleListDialog(
                                     popupGroupHintState.show(groups[it].title.ifBlank { "未命名分组" })
                                 }
                                 selectedGroupIndex = it
+                                onSelectGroup(it)
                             },
                             onToggleLayout = {
                                 performKeyHaptic()
@@ -16031,6 +16033,7 @@ private fun QuickSubtitleListDialog(
                             onSelectGroup = {
                                 performKeyHaptic()
                                 selectedGroupIndex = it
+                                onSelectGroup(it)
                             },
                             onToggleLayout = {
                                 performKeyHaptic()
@@ -17748,6 +17751,7 @@ fun QuickSubtitleScreen(
                 initialGroupIndex = selectedGroupIndex,
                 layoutMode = quickSubtitleListDialogLayoutMode,
                 onLayoutModeChange = { quickSubtitleListDialogLayoutMode = it },
+                onSelectGroup = { viewModel.selectQuickSubtitleGroup(it) },
                 onDismiss = { quickSubtitleListDialogVisible = false },
                 onSubmit = { text ->
                     viewModel.submitQuickSubtitlePreset(
@@ -19765,7 +19769,7 @@ fun FloatingOverlayScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "这里读取当前已加入悬浮窗启动器的应用快捷方式；内嵌列表补全关闭时仅保留运行时可查询项和微信“扫一扫”。",
+                        "这里读取当前已加入悬浮窗启动器的应用快捷方式；内嵌列表补全关闭时仅保留运行时可查询项和必要的固定入口。",
                         style = MaterialTheme.typography.bodySmall
                     )
                     OutlinedTextField(
