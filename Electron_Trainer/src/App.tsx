@@ -8901,22 +8901,25 @@ function App() {
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: { xs: '1fr', lg: '320px minmax(0, 1fr)' },
+          gridTemplateColumns: { xs: '1fr', md: '300px minmax(0, 1fr)', xl: '340px minmax(0, 1fr)' },
           gap: 2,
           alignItems: 'stretch',
           flex: 1,
           minHeight: 0,
-          overflow: { xs: 'auto', lg: 'hidden' },
+          overflow: { xs: 'auto', md: 'visible' },
         }}
       >
         <Stack
           spacing={2}
           sx={{
             minHeight: 0,
-            overflow: { lg: 'auto' },
-            px: { lg: 0.75 },
-            pt: { lg: 0.75 },
+            overflow: { md: 'auto' },
+            px: { md: 0.75 },
+            mx: { md: -0.75 },
+            width: { md: 'calc(100% + 12px)' },
+            pt: { md: 0.75 },
             pb: 1,
+            boxSizing: 'border-box',
           }}
         >
           <Paper sx={cardPaperSx}>
@@ -9078,7 +9081,7 @@ function App() {
           </Paper>
         </Stack>
 
-        <Stack spacing={2} sx={{ minHeight: 0, height: '100%', p: 0.75, boxSizing: 'border-box' }}>
+        <Stack spacing={2} sx={{ minHeight: 0, height: '100%', pt: 0.75, pb: 1, boxSizing: 'border-box' }}>
           <Paper sx={{ ...cardPaperSx, minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column' }}>
             <Stack spacing={1.5} sx={{ minHeight: 0, flex: 1 }}>
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }}>
@@ -9137,7 +9140,7 @@ function App() {
                 onDrop={handleSoundboardAudioDrop}
                 sx={{
                   flex: 1,
-                  minHeight: { xs: 360, lg: 0 },
+                  minHeight: { xs: 360, md: 0 },
                   overflow: 'auto',
                   px: 0.75,
                   pt: 0.75,
