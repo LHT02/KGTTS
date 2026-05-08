@@ -15704,6 +15704,350 @@ private fun QuickSubtitleMicFab(
     }
 }
 
+private enum class QuickSubtitleListPopupLayout {
+    Grid,
+    List
+}
+
+@Composable
+private fun QuickSubtitlePopupItem(
+    text: String,
+    grid: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(if (grid) 76.dp else 64.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(UiTokens.Radius),
+        backgroundColor = md2ElevatedCardContainerColor(UiTokens.MenuElevation),
+        elevation = UiTokens.CardElevation
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Text(
+                text = text,
+                maxLines = if (grid) 2 else 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyLarge
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickSubtitleListPopupTabs(
+    groups: List<QuickSubtitleGroup>,
+    selectedIndex: Int,
+    vertical: Boolean,
+    layoutMode: QuickSubtitleListPopupLayout,
+    onSelectGroup: (Int) -> Unit,
+    onToggleLayout: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(UiTokens.Radius),
+        backgroundColor = md2CardContainerColor(),
+        elevation = UiTokens.CardElevation
+    ) {
+        if (vertical) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 3.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    groups.forEachIndexed { index, group ->
+                        val selected = selectedIndex == index
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp)
+                                .clip(RoundedCornerShape(UiTokens.Radius))
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                    else Color.Transparent
+                                )
+                                .clickable { onSelectGroup(index) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            MsIcon(
+                                name = group.icon,
+                                contentDescription = group.title.ifBlank { "未命名分组" }
+                            )
+                        }
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .padding(horizontal = 8.dp)
+                        .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
+                )
+                IconButton(
+                    onClick = onToggleLayout,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    MsIcon(
+                        name = if (layoutMode == QuickSubtitleListPopupLayout.Grid) "grid_view" else "view_list",
+                        contentDescription = if (layoutMode == QuickSubtitleListPopupLayout.Grid) "当前宫格，点击切换列表" else "当前列表，点击切换宫格"
+                    )
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(start = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    groups.forEachIndexed { index, group ->
+                        val selected = selectedIndex == index
+                        Row(
+                            modifier = Modifier
+                                .height(44.dp)
+                                .clip(RoundedCornerShape(UiTokens.Radius))
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                    else Color.Transparent
+                                )
+                                .clickable { onSelectGroup(index) }
+                                .padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val title = group.title.ifBlank { "未命名分组" }
+                            MsIcon(group.icon, contentDescription = title)
+                            Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Spacer(Modifier.width(2.dp))
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(34.dp)
+                        .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
+                )
+                IconButton(
+                    onClick = onToggleLayout,
+                    modifier = Modifier
+                        .width(52.dp)
+                        .fillMaxHeight()
+                ) {
+                    MsIcon(
+                        name = if (layoutMode == QuickSubtitleListPopupLayout.Grid) "grid_view" else "view_list",
+                        contentDescription = if (layoutMode == QuickSubtitleListPopupLayout.Grid) "当前宫格，点击切换列表" else "当前列表，点击切换宫格"
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickSubtitleListDialog(
+    groups: List<QuickSubtitleGroup>,
+    initialGroupIndex: Int,
+    layoutMode: QuickSubtitleListPopupLayout,
+    onLayoutModeChange: (QuickSubtitleListPopupLayout) -> Unit,
+    onDismiss: () -> Unit,
+    onSubmit: (String) -> Unit
+) {
+    if (groups.isEmpty()) return
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val performKeyHaptic = rememberKigttsKeyHaptic()
+    val popupGroupHintState = rememberGroupSwitchHintState()
+    var selectedGroupIndex by remember(groups, initialGroupIndex) {
+        mutableIntStateOf(initialGroupIndex.coerceIn(0, groups.lastIndex))
+    }
+    val currentItems = groups.getOrNull(selectedGroupIndex)?.items.orEmpty()
+    val grid = layoutMode == QuickSubtitleListPopupLayout.Grid
+    val content: @Composable (Modifier) -> Unit = { modifier ->
+        Card(
+            modifier = modifier,
+            shape = RoundedCornerShape(UiTokens.Radius),
+            backgroundColor = md2CardContainerColor(),
+            elevation = UiTokens.MenuElevation
+        ) {
+            if (currentItems.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "当前分组暂无快捷文本",
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else if (grid) {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(138.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(
+                        count = currentItems.size,
+                        key = { index -> "${selectedGroupIndex}_${index}_${currentItems[index]}" }
+                    ) { index ->
+                        val text = currentItems[index]
+                        QuickSubtitlePopupItem(
+                            text = text,
+                            grid = true,
+                            onClick = {
+                                performKeyHaptic()
+                                onSubmit(text)
+                                onDismiss()
+                            }
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(
+                        items = currentItems,
+                        key = { index, text -> "${selectedGroupIndex}_${index}_$text" }
+                    ) { _, text ->
+                        QuickSubtitlePopupItem(
+                            text = text,
+                            grid = false,
+                            onClick = {
+                                performKeyHaptic()
+                                onSubmit(text)
+                                onDismiss()
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.36f))
+                .clickable(onClick = onDismiss)
+                .padding(
+                    horizontal = if (isLandscape) 26.dp else 16.dp,
+                    vertical = if (isLandscape) 18.dp else 26.dp
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .widthIn(max = if (isLandscape) 760.dp else 520.dp)
+                    .heightIn(max = if (isLandscape) 360.dp else 560.dp)
+                    .fillMaxWidth()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {}
+            ) {
+                if (isLandscape) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        content(Modifier.weight(1f).fillMaxHeight())
+                        QuickSubtitleListPopupTabs(
+                            groups = groups,
+                            selectedIndex = selectedGroupIndex,
+                            vertical = true,
+                            layoutMode = layoutMode,
+                            onSelectGroup = {
+                                performKeyHaptic()
+                                if (it != selectedGroupIndex) {
+                                    popupGroupHintState.show(groups[it].title.ifBlank { "未命名分组" })
+                                }
+                                selectedGroupIndex = it
+                            },
+                            onToggleLayout = {
+                                performKeyHaptic()
+                                onLayoutModeChange(
+                                    if (layoutMode == QuickSubtitleListPopupLayout.Grid) QuickSubtitleListPopupLayout.List
+                                    else QuickSubtitleListPopupLayout.Grid
+                                )
+                            },
+                            modifier = Modifier
+                                .width(58.dp)
+                                .fillMaxHeight()
+                        )
+                    }
+                    GroupSwitchHintCard(
+                        state = popupGroupHintState,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 68.dp)
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        content(Modifier.weight(1f).fillMaxWidth())
+                        QuickSubtitleListPopupTabs(
+                            groups = groups,
+                            selectedIndex = selectedGroupIndex,
+                            vertical = false,
+                            layoutMode = layoutMode,
+                            onSelectGroup = {
+                                performKeyHaptic()
+                                selectedGroupIndex = it
+                            },
+                            onToggleLayout = {
+                                performKeyHaptic()
+                                onLayoutModeChange(
+                                    if (layoutMode == QuickSubtitleListPopupLayout.Grid) QuickSubtitleListPopupLayout.List
+                                    else QuickSubtitleListPopupLayout.Grid
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterialApi::class)
 fun QuickSubtitleScreen(
@@ -16022,6 +16366,14 @@ fun QuickSubtitleScreen(
         }
     }
     val hasVoice = state.voiceDir != null
+    var quickSubtitleListDialogVisible by rememberSaveable { mutableStateOf(false) }
+    var quickSubtitleListDialogLayoutMode by rememberSaveable {
+        mutableStateOf(QuickSubtitleListPopupLayout.Grid)
+    }
+    val openQuickSubtitleListDialog = {
+        performKeyHaptic()
+        quickSubtitleListDialogVisible = true
+    }
     val statusBarInsetTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBarsPadding = WindowInsets.navigationBars.asPaddingValues()
     val navBarsBottomInset = navBarsPadding.calculateBottomPadding()
@@ -16370,13 +16722,16 @@ fun QuickSubtitleScreen(
                                                                 shape = RoundedCornerShape(UiTokens.Radius),
                                                                 shadowStyle = MdCardShadowStyle
                                                             )
-                                                            .clickable {
-                                                                performKeyHaptic()
-                                                                viewModel.submitQuickSubtitlePreset(
-                                                                    text = text,
-                                                                    hasVoice = hasVoice
-                                                                )
-                                                            },
+                                                            .combinedClickable(
+                                                                onClick = {
+                                                                    performKeyHaptic()
+                                                                    viewModel.submitQuickSubtitlePreset(
+                                                                        text = text,
+                                                                        hasVoice = hasVoice
+                                                                    )
+                                                                },
+                                                                onLongClick = openQuickSubtitleListDialog
+                                                            ),
                                                         shape = RoundedCornerShape(UiTokens.Radius),
                                                         backgroundColor = md2ElevatedCardContainerColor(UiTokens.MenuElevation),
                                                         elevation = 0.dp
@@ -16717,14 +17072,17 @@ fun QuickSubtitleScreen(
                                                                     modifier = Modifier
                                                                         .width(148.dp)
                                                                         .height(94.dp)
-                                                                        .clickable {
-                                                                            performKeyHaptic()
-                                                                            viewModel.submitQuickSubtitlePreset(
-                                                                                text = text,
-                                                                                hasVoice = hasVoice,
-                                                                                interruptCurrent = state.quickSubtitleInterruptQueue
-                                                                            )
-                                                                        }
+                                                                        .combinedClickable(
+                                                                            onClick = {
+                                                                                performKeyHaptic()
+                                                                                viewModel.submitQuickSubtitlePreset(
+                                                                                    text = text,
+                                                                                    hasVoice = hasVoice,
+                                                                                    interruptCurrent = state.quickSubtitleInterruptQueue
+                                                                                )
+                                                                            },
+                                                                            onLongClick = openQuickSubtitleListDialog
+                                                                        )
                                                                         .padding(horizontal = 12.dp, vertical = 8.dp),
                                                                     contentAlignment = Alignment.CenterStart
                                                                 ) {
@@ -16949,13 +17307,16 @@ fun QuickSubtitleScreen(
                                                         .padding(vertical = 3.dp)
                                                         .width(148.dp)
                                                         .height(94.dp)
-                                                        .clickable {
-                                                            performKeyHaptic()
-                                                            viewModel.submitQuickSubtitlePreset(
-                                                                text = text,
-                                                                hasVoice = hasVoice
-                                                            )
-                                                        },
+                                                        .combinedClickable(
+                                                            onClick = {
+                                                                performKeyHaptic()
+                                                                viewModel.submitQuickSubtitlePreset(
+                                                                    text = text,
+                                                                    hasVoice = hasVoice
+                                                                )
+                                                            },
+                                                            onLongClick = openQuickSubtitleListDialog
+                                                        ),
                                                     shape = RoundedCornerShape(UiTokens.Radius),
                                                     backgroundColor = md2CardContainerColor(),
                                                     elevation = UiTokens.CardElevation
@@ -17378,6 +17739,23 @@ fun QuickSubtitleScreen(
                 onPushToTalkPressEnd = onPushToTalkPressEnd,
                 onPttDragTargetChanged = { pttDragTarget = it },
                 modifier = fabModifier
+            )
+        }
+
+        if (quickSubtitleListDialogVisible) {
+            QuickSubtitleListDialog(
+                groups = groups,
+                initialGroupIndex = selectedGroupIndex,
+                layoutMode = quickSubtitleListDialogLayoutMode,
+                onLayoutModeChange = { quickSubtitleListDialogLayoutMode = it },
+                onDismiss = { quickSubtitleListDialogVisible = false },
+                onSubmit = { text ->
+                    viewModel.submitQuickSubtitlePreset(
+                        text = text,
+                        hasVoice = hasVoice,
+                        interruptCurrent = state.quickSubtitleInterruptQueue
+                    )
+                }
             )
         }
 
