@@ -2546,13 +2546,13 @@ function App() {
   const applySoundboardDragPosition = (clientY: number) => {
     const drag = soundboardItemDragRef.current
     if (!drag) return
-    const row = getSoundboardDraggedRow(drag.itemId)
-    if (row) {
-      row.style.transform = `translate3d(0, ${clientY - drag.startY}px, 0) scale(1.006)`
-      row.style.transition = 'none'
-    }
     const scrollTop = soundboardItemScrollRef.current?.scrollTop ?? drag.startScrollTop
     const scrollDelta = scrollTop - drag.startScrollTop
+    const row = getSoundboardDraggedRow(drag.itemId)
+    if (row) {
+      row.style.transform = `translate3d(0, ${clientY - drag.startY + scrollDelta}px, 0) scale(1.006)`
+      row.style.transition = 'none'
+    }
     const draggedCenter = clientY - drag.pointerOffsetY + drag.rowHeight / 2
     const nextTarget = drag.rowCenters.findIndex((center) => draggedCenter < center - scrollDelta)
     const targetIndex = clampNumber(nextTarget < 0 ? drag.rowCenters.length - 1 : nextTarget, 0, drag.rowCenters.length - 1)
@@ -4198,6 +4198,12 @@ function App() {
       setSoundboardItemDrag(null)
       soundboardCommitDragRef.current(drag)
     }
+    const onScroll = () => {
+      if (!soundboardItemDragRef.current) return
+      soundboardApplyDragPositionRef.current(soundboardDragPointerYRef.current)
+    }
+    const scrollEl = soundboardItemScrollRef.current
+    scrollEl?.addEventListener('scroll', onScroll, { passive: true })
     window.addEventListener('pointermove', onPointerMove, { passive: false })
     window.addEventListener('pointerup', finish, { passive: false })
     window.addEventListener('pointercancel', finish, { passive: false })
@@ -4206,6 +4212,7 @@ function App() {
       stopSoundboardAutoScroll()
       const drag = soundboardItemDragRef.current
       if (drag) soundboardClearDraggedRowStyleRef.current(drag.itemId)
+      scrollEl?.removeEventListener('scroll', onScroll)
       window.removeEventListener('pointermove', onPointerMove)
       window.removeEventListener('pointerup', finish)
       window.removeEventListener('pointercancel', finish)
@@ -8824,7 +8831,17 @@ function App() {
   )
 
   const soundboardContent = (
-    <Stack spacing={2} sx={{ flex: 1, minHeight: 0, width: '100%', overflow: 'hidden' }}>
+    <Stack
+      spacing={2}
+      sx={{
+        flex: 1,
+        minHeight: 0,
+        width: '100%',
+        overflow: 'hidden',
+        p: 0.75,
+        boxSizing: 'border-box',
+      }}
+    >
       <Paper
         sx={{
           ...cardPaperSx,
@@ -8892,7 +8909,16 @@ function App() {
           overflow: { xs: 'auto', lg: 'hidden' },
         }}
       >
-        <Stack spacing={2} sx={{ minHeight: 0, overflow: { lg: 'auto' }, pr: { lg: 0.5 }, pb: 0.5 }}>
+        <Stack
+          spacing={2}
+          sx={{
+            minHeight: 0,
+            overflow: { lg: 'auto' },
+            px: { lg: 0.75 },
+            pt: { lg: 0.75 },
+            pb: 1,
+          }}
+        >
           <Paper sx={cardPaperSx}>
             <Stack spacing={1.5}>
               <Stack direction="row" alignItems="center" justifyContent="space-between">
@@ -9052,7 +9078,7 @@ function App() {
           </Paper>
         </Stack>
 
-        <Stack spacing={2} sx={{ minHeight: 0, height: '100%' }}>
+        <Stack spacing={2} sx={{ minHeight: 0, height: '100%', p: 0.75, boxSizing: 'border-box' }}>
           <Paper sx={{ ...cardPaperSx, minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column' }}>
             <Stack spacing={1.5} sx={{ minHeight: 0, flex: 1 }}>
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }}>
@@ -9113,7 +9139,9 @@ function App() {
                   flex: 1,
                   minHeight: { xs: 360, lg: 0 },
                   overflow: 'auto',
-                  pr: 0.5,
+                  px: 0.75,
+                  pt: 0.75,
+                  pb: 1,
                 }}
               >
                 {!soundboardSelectedGroup?.items.length ? (
@@ -9158,55 +9186,72 @@ function App() {
                       <Paper
                         key={item.id}
                         data-soundboard-item-id={item.id}
-                        elevation={0}
+                        elevation={draggingThis ? 6 : 1}
                         sx={{
-                          p: 1,
+                          p: 1.25,
                           position: 'relative',
-                          zIndex: draggingThis ? 3 : 1,
+                          zIndex: draggingThis ? 4 : 1,
                           overflow: 'hidden',
                           borderRadius: 1,
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          bgcolor: 'background.paper',
-                          boxShadow: draggingThis ? '0 8px 22px rgba(0,0,0,0.22)' : 'none',
+                          bgcolor: draggingThis
+                            ? resolvedThemeMode === 'dark'
+                              ? '#252a2b'
+                              : '#ffffff'
+                            : resolvedThemeMode === 'dark'
+                              ? 'rgba(255,255,255,0.055)'
+                              : 'background.paper',
+                          backgroundImage:
+                            resolvedThemeMode === 'dark' && !draggingThis
+                              ? 'linear-gradient(rgba(255,255,255,0.035), rgba(255,255,255,0.035))'
+                              : 'none',
+                          boxShadow: draggingThis
+                            ? resolvedThemeMode === 'dark'
+                              ? '0 10px 24px rgba(0,0,0,0.34), 0 0 0 1px rgba(3,131,135,0.28)'
+                              : '0 10px 24px rgba(0,0,0,0.18), 0 0 0 1px rgba(3,131,135,0.20)'
+                            : resolvedThemeMode === 'dark'
+                              ? '0 1px 2px rgba(0,0,0,0.22), 0 3px 8px rgba(0,0,0,0.18)'
+                              : '0 1px 2px rgba(0,0,0,0.10), 0 3px 8px rgba(0,0,0,0.08)',
                           transform: draggingThis
                             ? 'translate3d(0, 0, 0) scale(1.006)'
                             : avoidOffset
                               ? `translate3d(0, ${avoidOffset}px, 0)`
                               : 'translate3d(0, 0, 0)',
                           transition: draggingThis
-                            ? 'box-shadow 120ms ease'
-                            : 'transform 160ms cubic-bezier(0.2, 0, 0, 1), background-color 120ms ease',
+                            ? 'box-shadow 120ms ease, background-color 120ms ease'
+                            : 'transform 160ms cubic-bezier(0.2, 0, 0, 1), background-color 120ms ease, box-shadow 120ms ease',
                           willChange: draggingThis || avoidOffset ? 'transform' : 'auto',
                           contentVisibility: soundboardItemDrag ? 'visible' : 'auto',
                           containIntrinsicSize: '96px',
                           cursor: draggingThis ? 'grabbing' : 'default',
                           '&:hover': {
-                            bgcolor: 'action.hover',
+                            bgcolor: resolvedThemeMode === 'dark' ? 'rgba(255,255,255,0.075)' : 'background.paper',
+                            boxShadow: draggingThis
+                              ? undefined
+                              : resolvedThemeMode === 'dark'
+                                ? '0 2px 4px rgba(0,0,0,0.24), 0 4px 12px rgba(0,0,0,0.20)'
+                                : '0 2px 4px rgba(0,0,0,0.12), 0 4px 12px rgba(0,0,0,0.10)',
                           },
                         }}
                       >
                         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }}>
                           <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
-                            <Tooltip title="拖动排序" arrow>
-                              <Box
-                                onPointerDown={(event) => startSoundboardItemDrag(event, item, itemIndex)}
-                                sx={{
-                                  width: 34,
-                                  height: 34,
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  borderRadius: '50%',
-                                  cursor: draggingThis ? 'grabbing' : 'grab',
-                                  color: draggingThis ? 'primary.main' : 'text.secondary',
-                                  touchAction: 'none',
-                                  '&:hover': { bgcolor: 'action.selected' },
-                                }}
-                              >
-                                <MsIcon name="drag_indicator" size={22} />
-                              </Box>
-                            </Tooltip>
+                            <Box
+                              onPointerDown={(event) => startSoundboardItemDrag(event, item, itemIndex)}
+                              sx={{
+                                width: 34,
+                                height: 34,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                borderRadius: '50%',
+                                cursor: draggingThis ? 'grabbing' : 'grab',
+                                color: draggingThis ? 'primary.main' : 'text.secondary',
+                                touchAction: 'none',
+                                '&:hover': { bgcolor: 'action.selected' },
+                              }}
+                            >
+                              <MsIcon name="drag_indicator" size={22} />
+                            </Box>
                             <Checkbox
                               size="small"
                               checked={selected}
