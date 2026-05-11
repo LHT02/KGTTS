@@ -113,6 +113,8 @@ object UserPrefs {
     private val KEY_OVERLAY_THEME_MODE = intPreferencesKey("overlay_theme_mode")
     private val KEY_FONT_SCALE_BLOCK_MODE = intPreferencesKey("font_scale_block_mode")
     private val KEY_HAPTIC_FEEDBACK_ENABLED = booleanPreferencesKey("haptic_feedback_enabled")
+    private val KEY_FORCE_FULL_WIDTH_TABS_ON_PHONE =
+        booleanPreferencesKey("force_full_width_tabs_on_phone")
     private val KEY_DRAWING_SAVE_RELATIVE_PATH = stringPreferencesKey("drawing_save_relative_path")
     private val KEY_QUICK_CARD_AUTO_SAVE_ON_EXIT = booleanPreferencesKey("quick_card_auto_save_on_exit")
     private val KEY_USE_BUILTIN_FILE_MANAGER = booleanPreferencesKey("use_builtin_file_manager")
@@ -208,6 +210,7 @@ object UserPrefs {
         val overlayThemeMode: Int = THEME_MODE_FOLLOW_SYSTEM,
         val fontScaleBlockMode: Int = FONT_SCALE_BLOCK_ICONS_ONLY,
         val hapticFeedbackEnabled: Boolean = true,
+        val forceFullWidthTabsOnPhone: Boolean = false,
         val drawingSaveRelativePath: String = DEFAULT_DRAWING_SAVE_RELATIVE_PATH,
         val quickCardAutoSaveOnExit: Boolean = false,
         val useBuiltinFileManager: Boolean = true,
@@ -409,6 +412,7 @@ object UserPrefs {
                 this[KEY_FONT_SCALE_BLOCK_MODE] ?: FONT_SCALE_BLOCK_ICONS_ONLY
             ),
             hapticFeedbackEnabled = this[KEY_HAPTIC_FEEDBACK_ENABLED] ?: true,
+            forceFullWidthTabsOnPhone = this[KEY_FORCE_FULL_WIDTH_TABS_ON_PHONE] ?: false,
             drawingSaveRelativePath = (this[KEY_DRAWING_SAVE_RELATIVE_PATH]
                 ?: DEFAULT_DRAWING_SAVE_RELATIVE_PATH).ifBlank { DEFAULT_DRAWING_SAVE_RELATIVE_PATH },
             quickCardAutoSaveOnExit = this[KEY_QUICK_CARD_AUTO_SAVE_ON_EXIT] ?: false,
@@ -704,6 +708,12 @@ object UserPrefs {
     suspend fun setHapticFeedbackEnabled(context: Context, enabled: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[KEY_HAPTIC_FEEDBACK_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setForceFullWidthTabsOnPhone(context: Context, enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_FORCE_FULL_WIDTH_TABS_ON_PHONE] = enabled
         }
     }
 

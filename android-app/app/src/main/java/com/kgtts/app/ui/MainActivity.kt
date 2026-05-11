@@ -618,6 +618,7 @@ data class UiState(
     val overlayThemeMode: Int = UserPrefs.THEME_MODE_FOLLOW_SYSTEM,
     val fontScaleBlockMode: Int = UserPrefs.FONT_SCALE_BLOCK_ICONS_ONLY,
     val hapticFeedbackEnabled: Boolean = true,
+    val forceFullWidthTabsOnPhone: Boolean = false,
     val drawingSaveRelativePath: String = UserPrefs.DEFAULT_DRAWING_SAVE_RELATIVE_PATH,
     val quickCardAutoSaveOnExit: Boolean = false,
     val useBuiltinFileManager: Boolean = true,
@@ -1386,6 +1387,7 @@ class MainViewModel(
             overlayThemeMode = settings.overlayThemeMode,
             fontScaleBlockMode = settings.fontScaleBlockMode,
             hapticFeedbackEnabled = settings.hapticFeedbackEnabled,
+            forceFullWidthTabsOnPhone = settings.forceFullWidthTabsOnPhone,
             drawingSaveRelativePath = normalizeDrawingSaveRelativePath(settings.drawingSaveRelativePath),
             quickCardAutoSaveOnExit = settings.quickCardAutoSaveOnExit,
             useBuiltinFileManager = settings.useBuiltinFileManager,
@@ -4284,6 +4286,13 @@ class MainViewModel(
         uiState = uiState.copy(hapticFeedbackEnabled = enabled)
         viewModelScope.launch {
             UserPrefs.setHapticFeedbackEnabled(appContext, enabled)
+        }
+    }
+
+    fun setForceFullWidthTabsOnPhone(enabled: Boolean) {
+        uiState = uiState.copy(forceFullWidthTabsOnPhone = enabled)
+        viewModelScope.launch {
+            UserPrefs.setForceFullWidthTabsOnPhone(appContext, enabled)
         }
     }
 
@@ -9753,6 +9762,8 @@ private fun Md2AnimatedOptionMenu(
         }
     }
     if (!rendered) return
+    val maxMenuHeight = (LocalConfiguration.current.screenHeightDp.dp - 96.dp)
+        .coerceAtLeast(160.dp)
     Popup(
         popupPositionProvider = popupPositionProvider,
         onDismissRequest = onDismissRequest,
@@ -9778,7 +9789,12 @@ private fun Md2AnimatedOptionMenu(
                     backgroundColor = md2CardContainerColor(),
                     elevation = UiTokens.MenuElevation
                 ) {
-                    Column(content = content)
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = maxMenuHeight)
+                            .verticalScroll(rememberScrollState()),
+                        content = content
+                    )
                 }
             }
         }
@@ -13528,6 +13544,11 @@ private fun SoundboardScreen(
 ) {
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val screenLongSideDp = maxOf(configuration.screenWidthDp, configuration.screenHeightDp)
+    val screenShortSideDp = minOf(configuration.screenWidthDp, configuration.screenHeightDp)
+    val phoneUa = screenShortSideDp < 600 || screenLongSideDp < 900
+    val useFullWidthLandscapeTabs = isLandscape && (!phoneUa || viewModel.uiState.forceFullWidthTabsOnPhone)
+    val landscapeTabRailWidth = if (useFullWidthLandscapeTabs) 140.dp else 54.dp
     val navBarsPadding = WindowInsets.navigationBars.asPaddingValues()
     val navBarsBottomInset = navBarsPadding.calculateBottomPadding()
     val groups = viewModel.soundboardGroups
@@ -13639,19 +13660,37 @@ private fun SoundboardScreen(
                             val selected = selectedGroupIndex == index
                             val tabBg =
                                 if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else Color.Transparent
-                            Box(
+                            val displayTitle = group.title.ifBlank { "未命名分组" }
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(44.dp)
                                     .clip(RoundedCornerShape(UiTokens.Radius))
                                     .background(tabBg)
                                     .clickable { selectSoundboardGroupWithHint(index) },
-                                contentAlignment = Alignment.Center
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = if (useFullWidthLandscapeTabs) {
+                                    Arrangement.spacedBy(8.dp)
+                                } else {
+                                    Arrangement.Center
+                                }
                             ) {
+                                if (useFullWidthLandscapeTabs) {
+                                    Spacer(Modifier.width(8.dp))
+                                }
                                 MsIcon(
                                     group.icon,
-                                    contentDescription = group.title.ifBlank { "未命名分组" }
+                                    contentDescription = displayTitle
                                 )
+                                if (useFullWidthLandscapeTabs) {
+                                    Text(
+                                        displayTitle,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                }
                             }
                         }
                     }
@@ -13764,7 +13803,7 @@ private fun SoundboardScreen(
                     }
                     tabsCard(
                         Modifier
-                            .width(54.dp)
+                            .width(landscapeTabRailWidth)
                             .fillMaxHeight(),
                         true
                     )
@@ -13773,7 +13812,7 @@ private fun SoundboardScreen(
                     state = groupHintState,
                     Modifier
                         .align(Alignment.CenterEnd)
-                        .padding(end = 64.dp)
+                        .padding(end = landscapeTabRailWidth + 10.dp)
                 )
             }
         } else {
@@ -15746,6 +15785,7 @@ private fun QuickSubtitleListPopupTabs(
     groups: List<QuickSubtitleGroup>,
     selectedIndex: Int,
     vertical: Boolean,
+    showVerticalLabels: Boolean = false,
     layoutMode: QuickSubtitleListPopupLayout,
     onSelectGroup: (Int) -> Unit,
     onToggleLayout: () -> Unit,
@@ -15772,7 +15812,8 @@ private fun QuickSubtitleListPopupTabs(
                 ) {
                     groups.forEachIndexed { index, group ->
                         val selected = selectedIndex == index
-                        Box(
+                        val title = group.title.ifBlank { "未命名分组" }
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(44.dp)
@@ -15782,12 +15823,29 @@ private fun QuickSubtitleListPopupTabs(
                                     else Color.Transparent
                                 )
                                 .clickable { onSelectGroup(index) },
-                            contentAlignment = Alignment.Center
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = if (showVerticalLabels) {
+                                Arrangement.spacedBy(8.dp)
+                            } else {
+                                Arrangement.Center
+                            }
                         ) {
+                            if (showVerticalLabels) {
+                                Spacer(Modifier.width(8.dp))
+                            }
                             MsIcon(
                                 name = group.icon,
-                                contentDescription = group.title.ifBlank { "未命名分组" }
+                                contentDescription = title
                             )
+                            if (showVerticalLabels) {
+                                Text(
+                                    text = title,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.width(4.dp))
+                            }
                         }
                     }
                 }
@@ -15874,6 +15932,7 @@ private fun QuickSubtitleListDialog(
     groups: List<QuickSubtitleGroup>,
     initialGroupIndex: Int,
     layoutMode: QuickSubtitleListPopupLayout,
+    forceFullWidthTabsOnPhone: Boolean,
     onLayoutModeChange: (QuickSubtitleListPopupLayout) -> Unit,
     onSelectGroup: (Int) -> Unit,
     onDismiss: () -> Unit,
@@ -15882,6 +15941,11 @@ private fun QuickSubtitleListDialog(
     if (groups.isEmpty()) return
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val screenLongSideDp = maxOf(configuration.screenWidthDp, configuration.screenHeightDp)
+    val screenShortSideDp = minOf(configuration.screenWidthDp, configuration.screenHeightDp)
+    val phoneUa = screenShortSideDp < 600 || screenLongSideDp < 900
+    val useFullWidthLandscapeTabs = isLandscape && (!phoneUa || forceFullWidthTabsOnPhone)
+    val landscapeTabRailWidth = if (useFullWidthLandscapeTabs) 136.dp else 58.dp
     val performKeyHaptic = rememberKigttsKeyHaptic()
     val popupGroupHintState = rememberGroupSwitchHintState()
     var selectedGroupIndex by remember(groups, initialGroupIndex) {
@@ -15992,6 +16056,7 @@ private fun QuickSubtitleListDialog(
                             groups = groups,
                             selectedIndex = selectedGroupIndex,
                             vertical = true,
+                            showVerticalLabels = useFullWidthLandscapeTabs,
                             layoutMode = layoutMode,
                             onSelectGroup = {
                                 performKeyHaptic()
@@ -16009,7 +16074,7 @@ private fun QuickSubtitleListDialog(
                                 )
                             },
                             modifier = Modifier
-                                .width(58.dp)
+                                .width(landscapeTabRailWidth)
                                 .fillMaxHeight()
                         )
                     }
@@ -16017,7 +16082,7 @@ private fun QuickSubtitleListDialog(
                         state = popupGroupHintState,
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
-                            .padding(end = 68.dp)
+                            .padding(end = landscapeTabRailWidth + 10.dp)
                     )
                 } else {
                     Column(
@@ -17750,6 +17815,7 @@ fun QuickSubtitleScreen(
                 groups = groups,
                 initialGroupIndex = selectedGroupIndex,
                 layoutMode = quickSubtitleListDialogLayoutMode,
+                forceFullWidthTabsOnPhone = state.forceFullWidthTabsOnPhone,
                 onLayoutModeChange = { quickSubtitleListDialogLayoutMode = it },
                 onSelectGroup = { viewModel.selectQuickSubtitleGroup(it) },
                 onDismiss = { quickSubtitleListDialogVisible = false },
@@ -22367,6 +22433,12 @@ fun SettingsScreen(
                             ) { Text(label) }
                         }
                     }
+                    Md2SettingSwitchRow(
+                        title = "手机横屏使用全宽分组 Tab",
+                        checked = state.forceFullWidthTabsOnPhone,
+                        onCheckedChange = { viewModel.setForceFullWidthTabsOnPhone(it) },
+                        supportingText = "默认仅平板横屏显示图标和名称；开启后手机横屏的便捷字幕列表和音效板分组 Tab 也使用固定宽度的图标加名称样式。"
+                    )
                     Md2SettingSwitchRow(
                         title = "使用纯色顶栏",
                         checked = state.solidTopBar,
