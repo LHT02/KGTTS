@@ -1,8 +1,9 @@
+import json
 import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from . import packager, training
 from .audio_validation import is_audio_file_usable, split_usable_audio_entries
@@ -22,12 +23,141 @@ from .project_state import (
 )
 from .text_normalization import DEFAULT_SENTENCE_PERIOD, ensure_sentence_ending
 from .utils import find_executable
+from .runtime_manager import describe_piper_runtime
 
 
 def _ensure_dirs(paths: ProjectPaths) -> None:
     paths.work_dir.mkdir(parents=True, exist_ok=True)
     paths.segments_dir.mkdir(parents=True, exist_ok=True)
     paths.export_dir.mkdir(parents=True, exist_ok=True)
+
+
+PATH_OPTION_FIELDS = {
+    "asr_model_zip",
+    "piper_base_checkpoint",
+    "phonemizer_dict",
+    "piper_config",
+    "voicepack_avatar",
+}
+
+
+def _serialize_training_options(opts: TrainingOptions) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for name in TrainingOptions.__dataclass_fields__:
+        value = getattr(opts, name)
+        if name in PATH_OPTION_FIELDS:
+            payload[name] = str(value) if value else None
+        else:
+            payload[name] = value
+    return payload
+
+
+def _tail_text(path: Path, *, max_chars: int = 4000) -> str:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return ""
+    text = text.strip()
+    if len(text) > max_chars:
+        text = text[-max_chars:]
+    return text
+
+
+def _run_piper_standard_prepare(
+    paths: ProjectPaths,
+    opts: TrainingOptions,
+    progress: Optional[ProgressCallback] = None,
+) -> None:
+    status = describe_piper_runtime()
+    if not status.get("available"):
+        message = str(status.get("message") or "Piper 基础运行时不可用。")
+        raise RuntimeError(f"{message} 请先在“依赖准备”中安装或重新安装 Piper 基础运行时。")
+
+    piper_python = training._find_piper_python(prefer_cuda=False)  # type: ignore[attr-defined]
+    if not piper_python:
+        raise RuntimeError("Piper 基础运行时未安装。请先在“依赖准备”中安装 Piper 基础运行时。")
+
+    backend_root = Path(__file__).resolve().parents[1]
+    helper = backend_root / "tools" / "piper_standard_prepare.py"
+    if not helper.exists():
+        raise RuntimeError("普通模式素材准备组件缺失，请重新安装 KIGTTS Trainer 后再试。")
+
+    request_path = paths.work_dir / "piper_standard_prepare_request.json"
+    log_path = paths.work_dir / "prepare.log"
+    request = {
+        "paths": {
+            "project_root": str(paths.project_root),
+            "input_audio": [str(path) for path in paths.input_audio],
+        },
+        "training_options": _serialize_training_options(opts),
+    }
+    request_path.write_text(json.dumps(request, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    env = training._piper_env(piper_python)  # type: ignore[attr-defined]
+    env["PYTHONPATH"] = str(backend_root)
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+
+    creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    if progress:
+        progress("preprocess", 0.0, "正在准备录音素材...")
+    proc = subprocess.Popen(
+        [str(piper_python), "-u", str(helper), str(request_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        cwd=str(backend_root),
+        creationflags=creationflags,
+        close_fds=True,
+    )
+    error_message = ""
+    with log_path.open("w", encoding="utf-8") as log_file:
+        log_file.write(f"piper_python={piper_python}\n")
+        log_file.write(f"helper={helper}\n")
+        log_file.write(f"pid={proc.pid}\n")
+        log_file.flush()
+        if proc.stdout is not None:
+            for raw_line in proc.stdout:
+                log_file.write(raw_line)
+                log_file.flush()
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except Exception:
+                    continue
+                event_type = event.get("type")
+                if event_type == "progress" and progress:
+                    progress(
+                        str(event.get("stage") or "preprocess"),
+                        float(event.get("value") or 0.0),
+                        str(event.get("message") or ""),
+                    )
+                elif event_type == "done" and progress:
+                    progress(
+                        str(event.get("stage") or "asr"),
+                        float(event.get("value") or 1.0),
+                        str(event.get("message") or "素材准备完成"),
+                    )
+                elif event_type == "error":
+                    error_message = str(event.get("message") or "")
+                    traceback_text = str(event.get("traceback") or "")
+                    if traceback_text:
+                        log_file.write(traceback_text)
+                        log_file.flush()
+
+    return_code = proc.wait()
+    if return_code != 0:
+        detail = error_message or _tail_text(log_path)
+        raise RuntimeError(f"普通模式素材准备失败，详见 {log_path}\n{detail}".strip())
+    if not paths.training_manifest.exists():
+        raise RuntimeError(f"素材准备完成但没有生成训练清单：{paths.training_manifest}")
 
 
 def _expected_generated_entries(paths: ProjectPaths, mode: str, texts: list[str]) -> list[tuple[Path, str]]:
@@ -140,24 +270,12 @@ def run_pipeline(
     opts: TrainingOptions,
     progress: Optional[ProgressCallback] = None,
 ) -> PipelineResult:
-    from . import asr, preprocess, vad
-
     _ensure_dirs(paths)
     archive_input_audio(paths)
     archive_voicepack_avatar(paths, opts)
     save_project_config(paths, "piper", opts)
 
-    processed = preprocess.preprocess_audios(
-        paths.input_audio, paths.work_dir / "processed", opts, progress
-    )
-    segments = vad.vad_split(processed, paths.segments_dir, opts, progress)
-    transcripts = asr.transcribe_segments(segments, opts, progress)
-    if getattr(opts, "normalize_text_append_period", True):
-        period = getattr(opts, "text_normalization_period", DEFAULT_SENTENCE_PERIOD) or DEFAULT_SENTENCE_PERIOD
-        for item in transcripts:
-            item.text = ensure_sentence_ending(item.text, period)
-
-    training.write_metadata(transcripts, paths.training_manifest)
+    _run_piper_standard_prepare(paths, opts, progress)
     save_project_config(paths, "piper", opts)
     return _train_export_package(paths, opts, progress)
 

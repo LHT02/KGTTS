@@ -39,6 +39,7 @@ class TrainingOptions:
     voicepack_avatar: Optional[Path] = None
     normalize_text_append_period: bool = True
     text_normalization_period: str = "。"
+    trim_silence: bool = True
 
 
 @dataclass

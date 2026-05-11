@@ -43,6 +43,26 @@ def _resources_dir() -> Path:
     return base
 
 
+def _backend_tools_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "tools"
+
+
+def _piper_prep_script() -> Path:
+    bundled = _backend_tools_dir() / "piper_prep.py"
+    if bundled.exists():
+        return bundled
+    return _resources_dir() / "tools" / "piper_prep.py"
+
+
+def _espeak_ng_exe() -> Optional[Path]:
+    resources = _resources_dir()
+    candidates = [
+        resources / "tools" / "espeak-ng" / "eSpeak NG" / "espeak-ng.exe",
+        resources / "tools" / "espeak-ng" / "espeak-ng.exe",
+    ]
+    return next((path for path in candidates if path.exists()), None)
+
+
 def _find_piper_python(*, prefer_cuda: bool = False) -> Optional[Path]:
     if prefer_cuda:
         cuda_python = resolve_cuda_python()
@@ -444,7 +464,7 @@ def run_piper_training(
                 log_file.flush()
         except Exception:
             pass
-        prep_script = _resources_dir() / "tools" / "piper_prep.py"
+        prep_script = _piper_prep_script()
         if not prep_script.exists():
             raise RuntimeError("训练组件不完整，请重新安装 Piper 基础运行时后再试。")
         use_espeak = bool(opts.use_espeak)
@@ -476,6 +496,8 @@ def run_piper_training(
             "--speaker-id",
             str(opts.speaker_id),
         ]
+        if getattr(opts, "trim_silence", True):
+            prep_cmd.append("--trim-silence")
         if use_espeak:
             prep_cmd += [
                 "--phoneme-type",
@@ -502,6 +524,9 @@ def run_piper_training(
                 except Exception:
                     pass
         env = _piper_env(piper_python)
+        espeak_exe = _espeak_ng_exe()
+        if espeak_exe:
+            env["ESPEAK_NG_PATH"] = str(espeak_exe)
         if base_ckpt and progress:
             progress("train", 0.0, f"启用基线兼容加载: {base_ckpt.name}")
         if base_ckpt:

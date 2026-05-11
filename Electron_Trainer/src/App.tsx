@@ -91,6 +91,7 @@ type CommonPipelineOptions = {
   voicepack_avatar: string | null
   normalize_text_append_period: boolean
   text_normalization_period: string
+  trim_silence: boolean
 }
 
 const runtimeSourceLabels: Record<string, string> = {
@@ -1647,6 +1648,7 @@ function App() {
   const [audioFiles, setAudioFiles] = useState<string[]>([])
   const [quality, setQuality] = useState<'A' | 'B'>('A')
   const [denoise, setDenoise] = useState(false)
+  const [trimSilence, setTrimSilence] = useState(true)
   const [sampleRate, setSampleRate] = useState('22050')
   const [trainBatchSize, setTrainBatchSize] = useState('24')
   const [asrModel, setAsrModel] = useState('')
@@ -2149,6 +2151,7 @@ function App() {
       setDevice(nextDevice === 'cpu' ? 'cpu' : 'cuda')
     }
     setUseEspeak(Boolean(opts.use_espeak))
+    setTrimSilence(opts.trim_silence !== false)
     setAsrModel(readString('asr_model_zip'))
     setBaseCkpt(readString('piper_base_checkpoint'))
     setPiperConfig(readString('piper_config'))
@@ -3498,7 +3501,7 @@ function App() {
     setDependencyGuide(null)
   }
 
-  const collectPiperTrainingDependencyTargets = async () => {
+  const collectPiperTrainingDependencyTargets = async (options?: { requireBasicRuntime?: boolean }) => {
     const targets: DependencyGuideTarget[] = []
     const resourcesStatus = isTrainerResourcesReady(trainerResourcesStatus)
       ? trainerResourcesStatus
@@ -3507,19 +3510,21 @@ function App() {
       targets.push('trainer_resources')
     }
 
+    if (options?.requireBasicRuntime || device !== 'cuda') {
+      const runtimeStatus = isPiperRuntimeReady(piperRuntimeStatus)
+        ? piperRuntimeStatus
+        : await refreshPiperRuntimeStatus(true).catch(() => piperRuntimeStatus)
+      if (!isPiperRuntimeReady(runtimeStatus)) {
+        targets.push('piper_runtime')
+      }
+    }
+
     if (device === 'cuda') {
       const runtimeStatus = isPiperCudaRuntimeReady(cudaRuntimeStatus)
         ? cudaRuntimeStatus
         : await refreshCudaRuntimeStatus(true).catch(() => cudaRuntimeStatus)
       if (!isPiperCudaRuntimeReady(runtimeStatus)) {
         targets.push('piper_cuda_runtime')
-      }
-    } else {
-      const runtimeStatus = isPiperRuntimeReady(piperRuntimeStatus)
-        ? piperRuntimeStatus
-        : await refreshPiperRuntimeStatus(true).catch(() => piperRuntimeStatus)
-      if (!isPiperRuntimeReady(runtimeStatus)) {
-        targets.push('piper_runtime')
       }
     }
     return dedupeDependencyTargets(targets)
@@ -3543,7 +3548,7 @@ function App() {
   }
 
   const collectTrainingDependencyTargets = async (mode: TrainingMode) => {
-    const targets = await collectPiperTrainingDependencyTargets()
+    const targets = await collectPiperTrainingDependencyTargets({ requireBasicRuntime: mode === 'piper' })
     if (mode === 'voxcpm_distill') {
       targets.push(...(await collectVoxcpmSynthesisDependencyTargets()))
     }
@@ -4866,6 +4871,7 @@ function App() {
       voicepack_avatar: voicepackAvatar || null,
       normalize_text_append_period: true,
       text_normalization_period: '。',
+      trim_silence: trimSilence,
     }
   }
 
@@ -5596,6 +5602,8 @@ function App() {
   const guideModeOption = GUIDE_MODE_OPTIONS.find((item) => item.mode === trainingMode) ?? GUIDE_MODE_OPTIONS[0]
   const guideEffectiveProjectMode =
     trainingMode === 'resume_project' && resumeProjectStatus?.mode ? String(resumeProjectStatus.mode) : trainingMode
+  const guideNeedsPiperBasicRuntime = guideEffectiveProjectMode === 'piper' || device !== 'cuda'
+  const guideNeedsPiperCudaRuntime = device === 'cuda'
   const guideDependencyRows = [
     {
       key: 'resources',
@@ -5605,15 +5613,29 @@ function App() {
         ? 'ASR、Piper 基线和发音资源已准备好。'
         : '首次训练前需要先安装训练资源包。',
     },
-    {
-      key: device === 'cuda' ? 'piper_cuda' : 'piper_runtime',
-      label: device === 'cuda' ? 'Piper CUDA 运行时' : 'Piper 基础运行时',
-      ready: device === 'cuda' ? isPiperCudaRuntimeReady(cudaRuntimeStatus) : isPiperRuntimeReady(piperRuntimeStatus),
-      detail:
-        device === 'cuda'
-          ? '当前默认使用显卡训练；需要 Piper CUDA 运行时可用。'
-          : 'CPU 训练需要 Piper 基础运行时。',
-    },
+    ...(guideNeedsPiperBasicRuntime
+      ? [
+          {
+            key: 'piper_runtime',
+            label: 'Piper 基础运行时',
+            ready: isPiperRuntimeReady(piperRuntimeStatus),
+            detail:
+              guideEffectiveProjectMode === 'piper'
+                ? '普通模式会用它处理录音、切分和语音识别。'
+                : 'CPU 训练需要 Piper 基础运行时。',
+          },
+        ]
+      : []),
+    ...(guideNeedsPiperCudaRuntime
+      ? [
+          {
+            key: 'piper_cuda',
+            label: 'Piper CUDA 运行时',
+            ready: isPiperCudaRuntimeReady(cudaRuntimeStatus),
+            detail: '当前默认使用显卡训练；需要 Piper CUDA 运行时可用。',
+          },
+        ]
+      : []),
     ...(guideEffectiveProjectMode === 'voxcpm_distill'
       ? [
           {
@@ -8167,10 +8189,19 @@ function App() {
             }}
           />
           <Box sx={{ gridColumn: '1 / -1' }}>
-            <FormControlLabel
-              control={<Switch checked={denoise} onChange={(e) => setDenoise(e.target.checked)} />}
-              label="开启降噪/筛选"
-            />
+            <Stack spacing={0.5}>
+              <FormControlLabel
+                control={<Switch checked={denoise} onChange={(e) => setDenoise(e.target.checked)} />}
+                label="开启降噪/筛选"
+              />
+              <FormControlLabel
+                control={<Switch checked={trimSilence} onChange={(e) => setTrimSilence(e.target.checked)} />}
+                label="训练时自动裁剪音频首尾空白"
+              />
+              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', pl: 5 }}>
+                默认开启；只会裁剪送入训练的临时音频，不会改动原始录音或蒸馏语料文件。
+              </Typography>
+            </Stack>
           </Box>
           <PathField
             label="语音识别模型包"

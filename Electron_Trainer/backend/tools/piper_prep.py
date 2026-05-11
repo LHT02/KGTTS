@@ -3,6 +3,7 @@ import faulthandler
 import json
 import logging
 import os
+import re
 import subprocess
 import unicodedata
 from pathlib import Path
@@ -68,6 +69,44 @@ def find_espeak_ng(explicit: str | None) -> tuple[Path, Path]:
             if data_dir.exists():
                 return exe, data_dir
     raise FileNotFoundError("espeak-ng executable not found")
+
+
+def safe_audio_stem(path: Path) -> str:
+    stem = re.sub(r"[^0-9A-Za-z_.-]+", "_", path.stem).strip("._")
+    return stem or "audio"
+
+
+def trim_audio_edges(audio_path: Path, out_dir: Path, index: int, sample_rate: int) -> Path:
+    import numpy as np
+    import soundfile as sf
+
+    audio, sr = sf.read(audio_path, always_2d=False)
+    if audio.size == 0:
+        return audio_path
+    mono = audio.mean(axis=1) if getattr(audio, "ndim", 1) > 1 else audio
+    mono = np.asarray(mono, dtype=np.float32)
+    peak = float(np.max(np.abs(mono))) if mono.size else 0.0
+    if peak <= 1e-6:
+        return audio_path
+
+    # Keep a small safety margin so consonants and breath starts are not cut.
+    threshold = max(1e-4, peak * (10 ** (-45 / 20)))
+    voiced = np.flatnonzero(np.abs(mono) >= threshold)
+    if voiced.size <= 0:
+        return audio_path
+
+    pad = max(1, int(sr * 0.05))
+    start = max(0, int(voiced[0]) - pad)
+    end = min(len(mono), int(voiced[-1]) + pad + 1)
+    if start <= 0 and end >= len(mono):
+        return audio_path
+    if end - start < max(1, int(sr * 0.2)):
+        return audio_path
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / f"{index:06d}_{safe_audio_stem(audio_path)}.wav"
+    sf.write(target, audio[start:end], sr)
+    return target
 
 
 def _strip_language_flags(phoneme_text: str) -> str:
@@ -246,6 +285,7 @@ def main() -> None:
     parser.add_argument("--phoneme-type", choices=["text", "espeak"], default="text")
     parser.add_argument("--piper-config", help="Path to piper config.json for espeak mode")
     parser.add_argument("--espeak-voice", help="Override espeak voice (default from config)")
+    parser.add_argument("--trim-silence", action="store_true", help="Trim leading/trailing silence before Piper preprocessing")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -254,6 +294,7 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = out_dir / "cache" / str(args.sample_rate)
     cache_dir.mkdir(parents=True, exist_ok=True)
+    trim_dir = out_dir / "trimmed_wavs"
 
     mapping: Dict[str, List[str]] = {}
     piper_cfg: dict | None = None
@@ -353,6 +394,7 @@ def main() -> None:
     missing_total: Dict[str, int] = {}
     missing_audio = 0
     failed_audio = 0
+    trimmed_audio = 0
     written_entries = 0
     with dataset_path.open("w", encoding="utf-8") as out_f:
         for idx, (audio_path, text, phones) in enumerate(entries, 1):
@@ -371,10 +413,20 @@ def main() -> None:
             if args.skip_audio:
                 audio_norm_path = ""
                 audio_spec_path = ""
+                train_audio_path = audio_path
             else:
                 try:
+                    train_audio_path = audio_path
+                    if args.trim_silence:
+                        try:
+                            trimmed_path = trim_audio_edges(audio_path, trim_dir, idx, args.sample_rate)
+                            if trimmed_path != audio_path:
+                                train_audio_path = trimmed_path
+                                trimmed_audio += 1
+                        except Exception as exc:
+                            logging.warning("audio trim failed, using original: %s (%s)", audio_path, exc)
                     audio_norm_path, audio_spec_path = cache_norm_audio(
-                        audio_path,
+                        train_audio_path,
                         cache_dir,
                         detector,
                         args.sample_rate,
@@ -389,7 +441,7 @@ def main() -> None:
                 "audio_norm_path": str(audio_norm_path),
                 "audio_spec_path": str(audio_spec_path),
                 "text": text,
-                "audio_path": str(audio_path),
+                "audio_path": str(train_audio_path),
             }
             if use_speaker_id:
                 utt["speaker_id"] = args.speaker_id
@@ -405,6 +457,8 @@ def main() -> None:
         print(f"[prep] missing_audio={missing_audio}", flush=True)
     if failed_audio:
         print(f"[prep] failed_audio={failed_audio}", flush=True)
+    if args.trim_silence:
+        print(f"[prep] trimmed_audio={trimmed_audio}", flush=True)
     if written_entries <= 0:
         raise RuntimeError(
             "Piper dataset is empty after audio preprocessing; "
