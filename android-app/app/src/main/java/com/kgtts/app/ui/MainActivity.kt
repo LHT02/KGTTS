@@ -618,6 +618,7 @@ data class UiState(
     val overlayThemeMode: Int = UserPrefs.THEME_MODE_FOLLOW_SYSTEM,
     val fontScaleBlockMode: Int = UserPrefs.FONT_SCALE_BLOCK_ICONS_ONLY,
     val hapticFeedbackEnabled: Boolean = true,
+    val forceFullWidthTabsOnPhone: Boolean = false,
     val drawingSaveRelativePath: String = UserPrefs.DEFAULT_DRAWING_SAVE_RELATIVE_PATH,
     val quickCardAutoSaveOnExit: Boolean = false,
     val useBuiltinFileManager: Boolean = true,
@@ -644,6 +645,7 @@ data class UiState(
     val allowQuickTextTriggerSoundboard: Boolean = false,
     val quickSubtitleInterruptQueue: Boolean = true,
     val quickSubtitleAutoFit: Boolean = true,
+    val quickSubtitleAllowLargeFont: Boolean = false,
     val quickSubtitleCompactControls: Boolean = false,
     val quickSubtitleKeepInputPreview: Boolean = true,
     val bluetoothMediaTitleSubtitle: Boolean = false,
@@ -1386,6 +1388,7 @@ class MainViewModel(
             overlayThemeMode = settings.overlayThemeMode,
             fontScaleBlockMode = settings.fontScaleBlockMode,
             hapticFeedbackEnabled = settings.hapticFeedbackEnabled,
+            forceFullWidthTabsOnPhone = settings.forceFullWidthTabsOnPhone,
             drawingSaveRelativePath = normalizeDrawingSaveRelativePath(settings.drawingSaveRelativePath),
             quickCardAutoSaveOnExit = settings.quickCardAutoSaveOnExit,
             useBuiltinFileManager = settings.useBuiltinFileManager,
@@ -1411,6 +1414,7 @@ class MainViewModel(
             allowQuickTextTriggerSoundboard = settings.allowQuickTextTriggerSoundboard,
             quickSubtitleInterruptQueue = settings.quickSubtitleInterruptQueue,
             quickSubtitleAutoFit = settings.quickSubtitleAutoFit,
+            quickSubtitleAllowLargeFont = settings.quickSubtitleAllowLargeFont,
             quickSubtitleCompactControls = settings.quickSubtitleCompactControls,
             quickSubtitleKeepInputPreview = settings.quickSubtitleKeepInputPreview,
             bluetoothMediaTitleSubtitle = settings.bluetoothMediaTitleSubtitle,
@@ -1423,6 +1427,7 @@ class MainViewModel(
             pushToTalkPressed = if (settings.pushToTalkMode) uiState.pushToTalkPressed else false,
             pushToTalkStreamingText = if (settings.pushToTalkMode) uiState.pushToTalkStreamingText else ""
         )
+        coerceQuickSubtitleFontSizeToCurrentLimit()
         applySettingsToController(settings)
         if (settings.speakerVerifyEnabled && !speakerVerifyEnabled) {
             viewModelScope.launch(Dispatchers.IO) {
@@ -1480,7 +1485,7 @@ class MainViewModel(
         }
         val finalGroups = if (parsedGroups.isNotEmpty()) parsedGroups else defaultQuickSubtitleGroups()
         val selectedId = root.optLong("selectedGroupId", finalGroups.first().id)
-        val fontSize = root.optDouble("fontSizeSp", 56.0).toFloat().coerceIn(28f, 96f)
+        val fontSize = root.optDouble("fontSizeSp", 56.0).toFloat().coerceIn(28f, 800f)
         val currentText = root.optString("currentText", quickSubtitleCurrentText).ifBlank { quickSubtitleCurrentText }
         val inputText = root.optString("inputText", "")
         val playOnSend = root.optBoolean("playOnSend", true)
@@ -1821,8 +1826,18 @@ class MainViewModel(
     }
 
     fun setQuickSubtitleFontSize(size: Float) {
-        quickSubtitleFontSizeSp = size.coerceIn(28f, 96f)
+        quickSubtitleFontSizeSp = size.coerceIn(28f, quickSubtitleFontSizeMaxSp())
         saveQuickSubtitleConfig()
+    }
+
+    private fun quickSubtitleFontSizeMaxSp(): Float =
+        if (uiState.quickSubtitleAllowLargeFont) 800f else 96f
+
+    private fun coerceQuickSubtitleFontSizeToCurrentLimit() {
+        val coerced = quickSubtitleFontSizeSp.coerceIn(28f, quickSubtitleFontSizeMaxSp())
+        if (coerced != quickSubtitleFontSizeSp) {
+            quickSubtitleFontSizeSp = coerced
+        }
     }
 
     fun openQuickSubtitlePreview() {
@@ -3966,6 +3981,21 @@ class MainViewModel(
         }
     }
 
+    fun setQuickSubtitleAllowLargeFont(enabled: Boolean) {
+        val nextFontSize = if (enabled) {
+            quickSubtitleFontSizeSp
+        } else {
+            quickSubtitleFontSizeSp.coerceAtMost(96f)
+        }
+        val fontChanged = nextFontSize != quickSubtitleFontSizeSp
+        quickSubtitleFontSizeSp = nextFontSize
+        uiState = uiState.copy(quickSubtitleAllowLargeFont = enabled)
+        if (fontChanged) saveQuickSubtitleConfig()
+        viewModelScope.launch {
+            UserPrefs.setQuickSubtitleAllowLargeFont(appContext, enabled)
+        }
+    }
+
     fun setQuickSubtitleCompactControls(enabled: Boolean) {
         uiState = uiState.copy(quickSubtitleCompactControls = enabled)
         viewModelScope.launch {
@@ -4284,6 +4314,13 @@ class MainViewModel(
         uiState = uiState.copy(hapticFeedbackEnabled = enabled)
         viewModelScope.launch {
             UserPrefs.setHapticFeedbackEnabled(appContext, enabled)
+        }
+    }
+
+    fun setForceFullWidthTabsOnPhone(enabled: Boolean) {
+        uiState = uiState.copy(forceFullWidthTabsOnPhone = enabled)
+        viewModelScope.launch {
+            UserPrefs.setForceFullWidthTabsOnPhone(appContext, enabled)
         }
     }
 
@@ -5328,6 +5365,7 @@ private fun QuickCardMainScreen(
     onOpenScanner: () -> Unit
 ) {
     val context = LocalContext.current
+    val performKeyHaptic = rememberKigttsKeyHaptic()
     val cards = viewModel.quickCards
     val isLandscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val previewCardId = viewModel.quickCardPreviewCardId
@@ -5335,6 +5373,10 @@ private fun QuickCardMainScreen(
         previewCardId?.let { id -> cards.firstOrNull { it.id == id } }
     }
     val closePreview: () -> Unit = { viewModel.closeQuickCardPreview() }
+    val closePreviewWithHaptic: () -> Unit = {
+        performKeyHaptic()
+        viewModel.closeQuickCardPreview()
+    }
     val onCreateCardState = rememberUpdatedState(onCreateCard)
     val onOpenScannerState = rememberUpdatedState(onOpenScanner)
     val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -5429,6 +5471,7 @@ private fun QuickCardMainScreen(
                                     }
                                 },
                                 onCardClick = { card ->
+                                    performKeyHaptic()
                                     if (card == null) {
                                         onCreateCard(QuickCardType.Text, "")
                                     } else {
@@ -5437,13 +5480,16 @@ private fun QuickCardMainScreen(
                                 },
                                 onCardLongPress = { card ->
                                     if (card != null) {
+                                        performKeyHaptic()
                                         onOpenSort()
                                     }
                                 },
                                 onEdit = { card ->
+                                    performKeyHaptic()
                                     onOpenEditor(card.id)
                                 },
                                 onShare = { target ->
+                                    performKeyHaptic()
                                     shareQuickCard(context, target, true)
                                 }
                             )
@@ -5488,6 +5534,7 @@ private fun QuickCardMainScreen(
                                     }
                                 },
                                 onCardClick = { card ->
+                                    performKeyHaptic()
                                     if (card == null) {
                                         onCreateCard(QuickCardType.Text, "")
                                     } else {
@@ -5496,13 +5543,16 @@ private fun QuickCardMainScreen(
                                 },
                                 onCardLongPress = { card ->
                                     if (card != null) {
+                                        performKeyHaptic()
                                         onOpenSort()
                                     }
                                 },
                                 onEdit = { card ->
+                                    performKeyHaptic()
                                     onOpenEditor(card.id)
                                 },
                                 onShare = { target ->
+                                    performKeyHaptic()
                                     shareQuickCard(context, target, false)
                                 }
                             )
@@ -5544,7 +5594,7 @@ private fun QuickCardMainScreen(
                     .clickable(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() }
-                    ) { closePreview() },
+                    ) { closePreviewWithHaptic() },
                 contentAlignment = Alignment.Center
             ) {
                 val dialogCardAspect = if (isLandscape) QUICK_CARD_ASPECT_LANDSCAPE else QUICK_CARD_ASPECT_PORTRAIT
@@ -5571,13 +5621,15 @@ private fun QuickCardMainScreen(
                             } else {
                                 Modifier.width(finalWidth)
                             },
-                            onClick = {},
+                            onClick = { closePreviewWithHaptic() },
                             onLongClick = {},
                             onEdit = { card ->
+                                performKeyHaptic()
                                 closePreview()
                                 onOpenEditor(card.id)
                             },
                             onShare = { target ->
+                                performKeyHaptic()
                                 shareQuickCard(context, target, isLandscape)
                             }
                         )
@@ -7755,7 +7807,7 @@ private fun QuickCardOverlayIconButton(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    IconButton(
+    KigttsIconButton(
         onClick = onClick,
         modifier = modifier
             .size(34.dp)
@@ -7804,11 +7856,23 @@ private fun QuickCardEditorScreen(
     var exitConfirmAutoSaveChecked by remember { mutableStateOf(false) }
     var suppressNullDraftAutoBack by remember { mutableStateOf(false) }
     val presetColors = remember {
-        listOf("#038387", "#ff6d00", "#f4511e", "#8e24aa", "#3949ab", "#2e7d32", "#6d4c41", "#111111")
+        listOf(
+            "#f44336", "#e91e63", "#9c27b0", "#673ab7", "#3f51b5",
+            "#2196f3", "#03a9f4", "#00bcd4", "#009688", "#4caf50",
+            "#8bc34a", "#cddc39", "#ffeb3b", "#ffc107", "#ff9800",
+            "#ff5722", "#795548", "#9e9e9e", "#607d8b", "#038387"
+        )
     }
     fun normalizeHexOrNull(raw: String): String? {
         val v = raw.trim().let { if (it.startsWith("#")) it else "#$it" }
         return if (Regex("^#[0-9a-fA-F]{6}$").matches(v)) v.lowercase(Locale.US) else null
+    }
+    fun syncThemePickerFromHex(hex: String) {
+        themeHexInput = normalizeHexOrNull(hex) ?: "#038387"
+        val hsl = composeColorToHsl(quickCardThemeColor(themeHexInput))
+        themeHue = hsl[0]
+        themeSat = hsl[1]
+        themeLight = hsl[2]
     }
 
     if (draft == null) {
@@ -7970,48 +8034,32 @@ private fun QuickCardEditorScreen(
 
         Md2SettingsCard("主题色") {
             Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(UiTokens.Radius))
+                    .clickable {
+                        syncThemePickerFromHex(draft.themeColor)
+                        showThemeColorDialog = true
+                    }
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                presetColors.forEach { hex ->
-                    val c = quickCardThemeColor(hex)
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .background(c)
-                            .clickable { viewModel.updateQuickCardDraft { old -> old.copy(themeColor = hex) } }
-                    )
-                }
                 Box(
                     modifier = Modifier
-                        .size(28.dp)
+                        .size(34.dp)
                         .clip(CircleShape)
-                        .background(
-                            Brush.sweepGradient(
-                                colors = listOf(
-                                    Color(0xFFFF3D00),
-                                    Color(0xFFFFC400),
-                                    Color(0xFF00C853),
-                                    Color(0xFF00B0FF),
-                                    Color(0xFF7C4DFF),
-                                    Color(0xFFFF3D00)
-                                )
-                            )
-                        )
-                        .clickable {
-                            themeHexInput = draft.themeColor
-                            val hsl = composeColorToHsl(quickCardThemeColor(draft.themeColor))
-                            themeHue = hsl[0]
-                            themeSat = hsl[1]
-                            themeLight = hsl[2]
-                            showThemeColorDialog = true
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    MsIcon("palette", contentDescription = "自定义颜色", tint = Color.White)
+                        .background(quickCardThemeColor(draft.themeColor))
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("当前主题色", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        draft.themeColor.uppercase(Locale.US),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
+                MsIcon("palette", contentDescription = "打开名片主题色")
             }
         }
 
@@ -8154,10 +8202,33 @@ private fun QuickCardEditorScreen(
     if (showThemeColorDialog) {
         AlertDialog(
             onDismissRequest = { showThemeColorDialog = false },
-            title = { Text("HSL 滑条取色") },
+            title = { Text("名片主题色") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     val preview = hslToComposeColor(themeHue, themeSat, themeLight)
+                    Text(
+                        text = "候选主题色",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        presetColors.forEach { hex ->
+                            val c = quickCardThemeColor(hex)
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(CircleShape)
+                                    .background(c)
+                                    .clickable {
+                                        syncThemePickerFromHex(hex)
+                                    }
+                            )
+                        }
+                    }
                     val hueGradient = Brush.horizontalGradient(
                         listOf(
                             hslToComposeColor(0f, 1f, 0.5f),
@@ -8459,6 +8530,26 @@ private fun rememberKigttsKeyHaptic(): () -> Unit {
     return remember(view, enabled) {
         { view.performKigttsKeyHaptic(enabled) }
     }
+}
+
+@Composable
+private fun KigttsIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    val performHaptic = rememberKigttsKeyHaptic()
+    val currentOnClick by rememberUpdatedState(onClick)
+    IconButton(
+        onClick = {
+            performHaptic()
+            currentOnClick()
+        },
+        modifier = modifier,
+        enabled = enabled,
+        content = content
+    )
 }
 
 @Composable
@@ -9753,6 +9844,8 @@ private fun Md2AnimatedOptionMenu(
         }
     }
     if (!rendered) return
+    val maxMenuHeight = (LocalConfiguration.current.screenHeightDp.dp - 96.dp)
+        .coerceAtLeast(160.dp)
     Popup(
         popupPositionProvider = popupPositionProvider,
         onDismissRequest = onDismissRequest,
@@ -9778,7 +9871,12 @@ private fun Md2AnimatedOptionMenu(
                     backgroundColor = md2CardContainerColor(),
                     elevation = UiTokens.MenuElevation
                 ) {
-                    Column(content = content)
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = maxMenuHeight)
+                            .verticalScroll(rememberScrollState()),
+                        content = content
+                    )
                 }
             }
         }
@@ -10985,13 +11083,13 @@ fun AppScaffold(viewModel: MainViewModel) {
                         label = "topbar_nav_switch"
                     ) { navMode ->
                         if (navMode == 1 || navMode == 2 || navMode == 3 || navMode == 4) {
-                            IconButton(onClick = {
+                            KigttsIconButton(onClick = {
                                 popSecondaryPageSafely()
                             }) {
                                 MsIcon("arrow_back", contentDescription = "返回")
                             }
                         } else {
-                            IconButton(onClick = onNavClick) {
+                            KigttsIconButton(onClick = onNavClick) {
                                 MsIcon("menu", contentDescription = "打开菜单")
                             }
                         }
@@ -11122,7 +11220,7 @@ fun AppScaffold(viewModel: MainViewModel) {
                                 horizontalArrangement = Arrangement.End
                             ) {
                                 if (showQuickSubtitleCompactEditorAction) {
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = {
                                             quickSubtitleNavController.navigate(QuickSubtitleRoutes.Editor)
                                         },
@@ -11134,7 +11232,7 @@ fun AppScaffold(viewModel: MainViewModel) {
                                         )
                                     }
                                 }
-                                IconButton(
+                                KigttsIconButton(
                                     onClick = { quickSubtitleFullscreen = !quickSubtitleFullscreen },
                                     enabled = showQuickSubtitleActions
                                 ) {
@@ -11156,26 +11254,26 @@ fun AppScaffold(viewModel: MainViewModel) {
                                 horizontalArrangement = Arrangement.End
                             ) {
                                 if (quickSubtitleBatchActions != null) {
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = quickSubtitleBatchActions.onMove,
                                         enabled = showQuickSubtitleEditorActions && quickSubtitleBatchActions.canMove
                                     ) {
                                         MsIcon("drive_file_move", contentDescription = "移动到其它分组")
                                     }
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = quickSubtitleBatchActions.onDelete,
                                         enabled = showQuickSubtitleEditorActions && quickSubtitleBatchActions.canDelete
                                     ) {
                                         MsIcon("delete", contentDescription = "删除所选快捷文本")
                                     }
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = quickSubtitleBatchActions.onClose,
                                         enabled = showQuickSubtitleEditorActions
                                     ) {
                                         MsIcon("close", contentDescription = "退出批量管理")
                                     }
                                 } else {
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = {
                                             if (state.useBuiltinFileManager) {
                                                 showBuiltinQuickSubtitlePresetPicker = true
@@ -11187,7 +11285,7 @@ fun AppScaffold(viewModel: MainViewModel) {
                                     ) {
                                         MsIcon("folder_open", contentDescription = "导入便捷字幕预设")
                                     }
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = { quickSubtitlePresetExportDialog = true },
                                         enabled = showQuickSubtitleEditorActions && viewModel.quickSubtitleGroups.isNotEmpty()
                                     ) {
@@ -11207,26 +11305,26 @@ fun AppScaffold(viewModel: MainViewModel) {
                                 horizontalArrangement = Arrangement.End
                             ) {
                                 if (soundboardBatchActions != null) {
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = soundboardBatchActions.onMove,
                                         enabled = showSoundboardEditorActions && soundboardBatchActions.canMove
                                     ) {
                                         MsIcon("drive_file_move", contentDescription = "移动到其它分组")
                                     }
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = soundboardBatchActions.onDelete,
                                         enabled = showSoundboardEditorActions && soundboardBatchActions.canDelete
                                     ) {
                                         MsIcon("delete", contentDescription = "删除所选音效")
                                     }
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = soundboardBatchActions.onClose,
                                         enabled = showSoundboardEditorActions
                                     ) {
                                         MsIcon("close", contentDescription = "退出批量管理")
                                     }
                                 } else {
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = {
                                             if (state.useBuiltinFileManager) {
                                                 showBuiltinSoundboardPresetPicker = true
@@ -11238,7 +11336,7 @@ fun AppScaffold(viewModel: MainViewModel) {
                                     ) {
                                         MsIcon("folder_open", contentDescription = "导入音效板预设")
                                     }
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = { soundboardPresetExportDialog = true },
                                         enabled = showSoundboardEditorActions && viewModel.soundboardGroups.isNotEmpty()
                                     ) {
@@ -11257,19 +11355,19 @@ fun AppScaffold(viewModel: MainViewModel) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.End
                             ) {
-                                IconButton(
+                                KigttsIconButton(
                                     onClick = { viewModel.rotateDrawingCanvasQuarterTurns(-1) },
                                     enabled = showDrawingActions
                                 ) {
                                     MsIcon("rotate_left", contentDescription = "向左旋转画布")
                                 }
-                                IconButton(
+                                KigttsIconButton(
                                     onClick = { viewModel.rotateDrawingCanvasQuarterTurns(1) },
                                     enabled = showDrawingActions
                                 ) {
                                     MsIcon("rotate_right", contentDescription = "向右旋转画布")
                                 }
-                                IconButton(
+                                KigttsIconButton(
                                     onClick = { viewModel.saveDrawingSnapshot() },
                                     enabled = showDrawingActions && viewModel.drawStrokes.isNotEmpty()
                                 ) {
@@ -11287,13 +11385,13 @@ fun AppScaffold(viewModel: MainViewModel) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.End
                             ) {
-                                IconButton(
+                                KigttsIconButton(
                                     onClick = { quickCardActions?.onNew?.invoke() },
                                     enabled = showQuickCardMainActions && quickCardActions != null
                                 ) {
                                     MsIcon("add", contentDescription = "新建名片")
                                 }
-                                IconButton(
+                                KigttsIconButton(
                                     onClick = { quickCardActions?.onScan?.invoke() },
                                     enabled = showQuickCardMainActions && quickCardActions != null
                                 ) {
@@ -11311,13 +11409,13 @@ fun AppScaffold(viewModel: MainViewModel) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.End
                             ) {
-                                IconButton(
+                                KigttsIconButton(
                                     onClick = { quickCardActions?.onCopy?.invoke() },
                                     enabled = showQuickCardEditorActions && quickCardActions?.canCopy == true
                                 ) {
                                     MsIcon("content_copy", contentDescription = "复制名片")
                                 }
-                                IconButton(
+                                KigttsIconButton(
                                     onClick = { quickCardActions?.onDelete?.invoke() },
                                     enabled = showQuickCardEditorActions && quickCardActions?.canDelete == true
                                 ) {
@@ -11336,20 +11434,20 @@ fun AppScaffold(viewModel: MainViewModel) {
                                 horizontalArrangement = Arrangement.End
                             ) {
                                 if (quickCardActions?.canClose == true) {
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = { quickCardActions.onDelete?.invoke() },
                                         enabled = showQuickCardSortActions && quickCardActions.canDelete
                                     ) {
                                         MsIcon("delete", contentDescription = "删除选中名片")
                                     }
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = { quickCardActions.onClose?.invoke() },
                                         enabled = showQuickCardSortActions
                                     ) {
                                         MsIcon("close", contentDescription = "结束选择模式")
                                     }
                                 } else {
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = { quickCardActions?.onConfirm?.invoke() },
                                         enabled = showQuickCardSortActions && quickCardActions?.canConfirm == true
                                     ) {
@@ -11369,7 +11467,7 @@ fun AppScaffold(viewModel: MainViewModel) {
                                 horizontalArrangement = Arrangement.End
                             ) {
                                 Box {
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = { quickCardWebMenuExpanded = true },
                                         enabled = showQuickCardWebActions
                                     ) {
@@ -11457,7 +11555,7 @@ fun AppScaffold(viewModel: MainViewModel) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.End
                             ) {
-                                IconButton(
+                                KigttsIconButton(
                                     onClick = {
                                         if (state.useBuiltinFileManager) {
                                             showBuiltinVoicePicker = true
@@ -11481,7 +11579,7 @@ fun AppScaffold(viewModel: MainViewModel) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.End
                             ) {
-                                IconButton(
+                                KigttsIconButton(
                                     onClick = { settingsNavController.navigate(SettingsRoutes.Log) },
                                     enabled = showSettingsEntryActions
                                 ) {
@@ -11499,19 +11597,19 @@ fun AppScaffold(viewModel: MainViewModel) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.End
                             ) {
-                                IconButton(
+                                KigttsIconButton(
                                     onClick = { settingsActions?.onRefresh?.invoke() },
                                     enabled = showSettingsLogActions && settingsActions != null
                                 ) {
                                     MsIcon("refresh", contentDescription = "刷新日志")
                                 }
-                                IconButton(
+                                KigttsIconButton(
                                     onClick = { settingsActions?.onCopy?.invoke() },
                                     enabled = showSettingsLogActions && settingsActions?.canCopy == true
                                 ) {
                                     MsIcon("content_copy", contentDescription = "复制日志")
                                 }
-                                IconButton(
+                                KigttsIconButton(
                                     onClick = { settingsActions?.onShare?.invoke() },
                                     enabled = showSettingsLogActions && settingsActions?.canShare == true
                                 ) {
@@ -12093,6 +12191,7 @@ private fun AppDrawerContent(
     onSelect: (Int) -> Unit
 ) {
     val drawerLogoRes = if (currentAppDarkTheme()) R.drawable.logo_white else R.drawable.logo_black
+    val performKeyHaptic = rememberKigttsKeyHaptic()
     val animatedItemStartPadding by animateDpAsState(
         targetValue = if (expanded) 16.dp else 27.dp,
         animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
@@ -12168,7 +12267,10 @@ private fun AppDrawerContent(
                     .clickable(
                         interactionSource = interaction,
                         indication = rememberRipple(bounded = true)
-                    ) { onSelect(item.page) }
+                    ) {
+                        performKeyHaptic()
+                        onSelect(item.page)
+                    }
                     .padding(start = itemStartPadding, end = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Start
@@ -13528,6 +13630,11 @@ private fun SoundboardScreen(
 ) {
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val screenLongSideDp = maxOf(configuration.screenWidthDp, configuration.screenHeightDp)
+    val screenShortSideDp = minOf(configuration.screenWidthDp, configuration.screenHeightDp)
+    val phoneUa = screenShortSideDp < 600 || screenLongSideDp < 900
+    val useFullWidthLandscapeTabs = isLandscape && (!phoneUa || viewModel.uiState.forceFullWidthTabsOnPhone)
+    val landscapeTabRailWidth = if (useFullWidthLandscapeTabs) 140.dp else 54.dp
     val navBarsPadding = WindowInsets.navigationBars.asPaddingValues()
     val navBarsBottomInset = navBarsPadding.calculateBottomPadding()
     val groups = viewModel.soundboardGroups
@@ -13639,19 +13746,37 @@ private fun SoundboardScreen(
                             val selected = selectedGroupIndex == index
                             val tabBg =
                                 if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else Color.Transparent
-                            Box(
+                            val displayTitle = group.title.ifBlank { "未命名分组" }
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(44.dp)
                                     .clip(RoundedCornerShape(UiTokens.Radius))
                                     .background(tabBg)
                                     .clickable { selectSoundboardGroupWithHint(index) },
-                                contentAlignment = Alignment.Center
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = if (useFullWidthLandscapeTabs) {
+                                    Arrangement.spacedBy(8.dp)
+                                } else {
+                                    Arrangement.Center
+                                }
                             ) {
+                                if (useFullWidthLandscapeTabs) {
+                                    Spacer(Modifier.width(8.dp))
+                                }
                                 MsIcon(
                                     group.icon,
-                                    contentDescription = group.title.ifBlank { "未命名分组" }
+                                    contentDescription = displayTitle
                                 )
+                                if (useFullWidthLandscapeTabs) {
+                                    Text(
+                                        displayTitle,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                }
                             }
                         }
                     }
@@ -13662,7 +13787,7 @@ private fun SoundboardScreen(
                         color = MaterialTheme.colorScheme.primary
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            IconButton(onClick = onOpenEditor) {
+                            KigttsIconButton(onClick = onOpenEditor) {
                                 MsIcon(
                                     "edit",
                                     contentDescription = "编辑音效板",
@@ -13716,7 +13841,7 @@ private fun SoundboardScreen(
                         color = MaterialTheme.colorScheme.primary
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            IconButton(onClick = onOpenEditor) {
+                            KigttsIconButton(onClick = onOpenEditor) {
                                 MsIcon(
                                     "edit",
                                     contentDescription = "编辑音效板",
@@ -13764,7 +13889,7 @@ private fun SoundboardScreen(
                     }
                     tabsCard(
                         Modifier
-                            .width(54.dp)
+                            .width(landscapeTabRailWidth)
                             .fillMaxHeight(),
                         true
                     )
@@ -13773,7 +13898,7 @@ private fun SoundboardScreen(
                     state = groupHintState,
                     Modifier
                         .align(Alignment.CenterEnd)
-                        .padding(end = 64.dp)
+                        .padding(end = landscapeTabRailWidth + 10.dp)
                 )
             }
         } else {
@@ -13961,7 +14086,7 @@ private fun SoundboardGridItem(
                         )
                     }
                 }
-                IconButton(onClick = { if (playing) onStop() else onPlay() }) {
+                KigttsIconButton(onClick = { if (playing) onStop() else onPlay() }) {
                     MsIcon(
                         if (playing) "stop" else "play_arrow",
                         contentDescription = if (playing) "停止音效" else "播放音效"
@@ -14018,7 +14143,7 @@ private fun SoundboardListItem(
                         )
                     }
                 }
-                IconButton(onClick = { if (playing) onStop() else onPlay() }) {
+                KigttsIconButton(onClick = { if (playing) onStop() else onPlay() }) {
                     MsIcon(
                         if (playing) "stop" else "play_arrow",
                         contentDescription = if (playing) "停止音效" else "播放音效"
@@ -15746,6 +15871,7 @@ private fun QuickSubtitleListPopupTabs(
     groups: List<QuickSubtitleGroup>,
     selectedIndex: Int,
     vertical: Boolean,
+    showVerticalLabels: Boolean = false,
     layoutMode: QuickSubtitleListPopupLayout,
     onSelectGroup: (Int) -> Unit,
     onToggleLayout: () -> Unit,
@@ -15772,7 +15898,8 @@ private fun QuickSubtitleListPopupTabs(
                 ) {
                     groups.forEachIndexed { index, group ->
                         val selected = selectedIndex == index
-                        Box(
+                        val title = group.title.ifBlank { "未命名分组" }
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(44.dp)
@@ -15782,12 +15909,29 @@ private fun QuickSubtitleListPopupTabs(
                                     else Color.Transparent
                                 )
                                 .clickable { onSelectGroup(index) },
-                            contentAlignment = Alignment.Center
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = if (showVerticalLabels) {
+                                Arrangement.spacedBy(8.dp)
+                            } else {
+                                Arrangement.Center
+                            }
                         ) {
+                            if (showVerticalLabels) {
+                                Spacer(Modifier.width(8.dp))
+                            }
                             MsIcon(
                                 name = group.icon,
-                                contentDescription = group.title.ifBlank { "未命名分组" }
+                                contentDescription = title
                             )
+                            if (showVerticalLabels) {
+                                Text(
+                                    text = title,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.width(4.dp))
+                            }
                         }
                     }
                 }
@@ -15798,7 +15942,7 @@ private fun QuickSubtitleListPopupTabs(
                         .padding(horizontal = 8.dp)
                         .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
                 )
-                IconButton(
+                KigttsIconButton(
                     onClick = onToggleLayout,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -15853,7 +15997,7 @@ private fun QuickSubtitleListPopupTabs(
                         .height(34.dp)
                         .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
                 )
-                IconButton(
+                KigttsIconButton(
                     onClick = onToggleLayout,
                     modifier = Modifier
                         .width(52.dp)
@@ -15874,6 +16018,7 @@ private fun QuickSubtitleListDialog(
     groups: List<QuickSubtitleGroup>,
     initialGroupIndex: Int,
     layoutMode: QuickSubtitleListPopupLayout,
+    forceFullWidthTabsOnPhone: Boolean,
     onLayoutModeChange: (QuickSubtitleListPopupLayout) -> Unit,
     onSelectGroup: (Int) -> Unit,
     onDismiss: () -> Unit,
@@ -15882,6 +16027,11 @@ private fun QuickSubtitleListDialog(
     if (groups.isEmpty()) return
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val screenLongSideDp = maxOf(configuration.screenWidthDp, configuration.screenHeightDp)
+    val screenShortSideDp = minOf(configuration.screenWidthDp, configuration.screenHeightDp)
+    val phoneUa = screenShortSideDp < 600 || screenLongSideDp < 900
+    val useFullWidthLandscapeTabs = isLandscape && (!phoneUa || forceFullWidthTabsOnPhone)
+    val landscapeTabRailWidth = if (useFullWidthLandscapeTabs) 136.dp else 58.dp
     val performKeyHaptic = rememberKigttsKeyHaptic()
     val popupGroupHintState = rememberGroupSwitchHintState()
     var selectedGroupIndex by remember(groups, initialGroupIndex) {
@@ -15992,6 +16142,7 @@ private fun QuickSubtitleListDialog(
                             groups = groups,
                             selectedIndex = selectedGroupIndex,
                             vertical = true,
+                            showVerticalLabels = useFullWidthLandscapeTabs,
                             layoutMode = layoutMode,
                             onSelectGroup = {
                                 performKeyHaptic()
@@ -16009,7 +16160,7 @@ private fun QuickSubtitleListDialog(
                                 )
                             },
                             modifier = Modifier
-                                .width(58.dp)
+                                .width(landscapeTabRailWidth)
                                 .fillMaxHeight()
                         )
                     }
@@ -16017,7 +16168,7 @@ private fun QuickSubtitleListDialog(
                         state = popupGroupHintState,
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
-                            .padding(end = 68.dp)
+                            .padding(end = landscapeTabRailWidth + 10.dp)
                     )
                 } else {
                     Column(
@@ -16075,7 +16226,9 @@ fun QuickSubtitleScreen(
     val selectedGroupIndex = viewModel.currentQuickSubtitleGroupIndex().coerceIn(0, groups.lastIndex.coerceAtLeast(0))
     val quickItemsScrollState = rememberScrollState()
     val subtitleText = viewModel.quickSubtitleCurrentText
-    val subtitleSize = viewModel.quickSubtitleFontSizeSp
+    val subtitleFontSizeMax = if (state.quickSubtitleAllowLargeFont) 800f else 96f
+    val subtitleSize = viewModel.quickSubtitleFontSizeSp.coerceIn(28f, subtitleFontSizeMax)
+    val fullscreenPreviewFontSizeMax = if (state.quickSubtitleAllowLargeFont) 800f else 140f
     val subtitleBold = viewModel.quickSubtitleBold
     val subtitleCentered = viewModel.quickSubtitleCentered
     val subtitleRotated180 = viewModel.quickSubtitleRotated180
@@ -16102,7 +16255,9 @@ fun QuickSubtitleScreen(
         } else {
             "more_horiz"
         }
+    val performKeyHaptic = rememberKigttsKeyHaptic()
     val copySubtitleText = {
+        performKeyHaptic()
         val content = subtitleText.trim()
         if (content.isNotEmpty()) {
             clipboard.setText(AnnotatedString(content))
@@ -16120,7 +16275,6 @@ fun QuickSubtitleScreen(
     val compactQuickGroupSwipeThresholdPx = with(density) { 18.dp.toPx() }
     var compactQuickGroupSuppressAnimation by remember { mutableStateOf(false) }
     val currentCompactSelectedGroupIndex by rememberUpdatedState(selectedGroupIndex)
-    val performKeyHaptic = rememberKigttsKeyHaptic()
     val groupHintState = rememberGroupSwitchHintState()
     fun selectQuickSubtitleGroupWithHint(index: Int, holdHintUntilRelease: Boolean = false) {
         if (index !in groups.indices) return
@@ -16547,7 +16701,10 @@ fun QuickSubtitleScreen(
                                         .weight(1f)
                                         .fillMaxHeight()
                                         .combinedClickable(
-                                            onClick = { viewModel.openQuickSubtitlePreview() },
+                                            onClick = {
+                                                performKeyHaptic()
+                                                viewModel.openQuickSubtitlePreview()
+                                            },
                                             onLongClick = copySubtitleText
                                         )
                                 ) {
@@ -16625,7 +16782,7 @@ fun QuickSubtitleScreen(
                                                                 Md2VerticalSlider(
                                                                     value = subtitleSize,
                                                                     onValueChange = { viewModel.setQuickSubtitleFontSize(it) },
-                                                                    valueRange = 28f..96f,
+                                                                    valueRange = 28f..subtitleFontSizeMax,
                                                                     modifier = Modifier
                                                                         .fillMaxHeight()
                                                                         .width(28.dp)
@@ -16830,8 +16987,7 @@ fun QuickSubtitleScreen(
                                             color = MaterialTheme.colorScheme.primary
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
-                                                IconButton(onClick = {
-                                                    performKeyHaptic()
+                                                KigttsIconButton(onClick = {
                                                     onOpenEditor()
                                                 }) {
                                                     MsIcon(
@@ -16880,7 +17036,10 @@ fun QuickSubtitleScreen(
                                     .weight(1f)
                                     .fillMaxWidth()
                                     .combinedClickable(
-                                        onClick = { viewModel.openQuickSubtitlePreview() },
+                                        onClick = {
+                                            performKeyHaptic()
+                                            viewModel.openQuickSubtitlePreview()
+                                        },
                                         onLongClick = copySubtitleText
                                     )
                             ) {
@@ -16949,7 +17108,7 @@ fun QuickSubtitleScreen(
                                                             Slider(
                                                                 value = subtitleSize,
                                                                 onValueChange = { viewModel.setQuickSubtitleFontSize(it) },
-                                                                valueRange = 28f..96f,
+                                                                valueRange = 28f..subtitleFontSizeMax,
                                                                 modifier = Modifier
                                                                     .weight(1f)
                                                                     .height(36.dp)
@@ -17425,8 +17584,7 @@ fun QuickSubtitleScreen(
                                                     color = MaterialTheme.colorScheme.primary
                                                 ) {
                                                     Box(contentAlignment = Alignment.Center) {
-                                                        IconButton(onClick = {
-                                                            performKeyHaptic()
+                                                        KigttsIconButton(onClick = {
                                                             onOpenEditor()
                                                         }) {
                                                             MsIcon(
@@ -17555,7 +17713,7 @@ fun QuickSubtitleScreen(
                             ),
                             trailingIcon = {
                                 if (inputFieldValue.text.isNotEmpty()) {
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = {
                                             inputFieldValue = TextFieldValue("")
                                             viewModel.updateQuickSubtitleInputText("")
@@ -17587,7 +17745,7 @@ fun QuickSubtitleScreen(
                         } else {
                             Spacer(modifier = Modifier.size(48.dp))
                         }
-                        IconButton(
+                        KigttsIconButton(
                             onClick = sendInput,
                             enabled = inputFieldValue.text.trim().isNotEmpty()
                         ) {
@@ -17633,7 +17791,7 @@ fun QuickSubtitleScreen(
                             ),
                             trailingIcon = {
                                 if (inputFieldValue.text.isNotEmpty()) {
-                                    IconButton(
+                                    KigttsIconButton(
                                         onClick = {
                                             inputFieldValue = TextFieldValue("")
                                             viewModel.updateQuickSubtitleInputText("")
@@ -17652,7 +17810,7 @@ fun QuickSubtitleScreen(
                                 cursorColor = MaterialTheme.colorScheme.primary
                             )
                         )
-                        IconButton(
+                        KigttsIconButton(
                             onClick = sendInput,
                             enabled = inputFieldValue.text.trim().isNotEmpty()
                         ) {
@@ -17750,6 +17908,7 @@ fun QuickSubtitleScreen(
                 groups = groups,
                 initialGroupIndex = selectedGroupIndex,
                 layoutMode = quickSubtitleListDialogLayoutMode,
+                forceFullWidthTabsOnPhone = state.forceFullWidthTabsOnPhone,
                 onLayoutModeChange = { quickSubtitleListDialogLayoutMode = it },
                 onSelectGroup = { viewModel.selectQuickSubtitleGroup(it) },
                 onDismiss = { quickSubtitleListDialogVisible = false },
@@ -17773,7 +17932,10 @@ fun QuickSubtitleScreen(
                         .fillMaxSize()
                         .background(Color.Black.copy(alpha = 0.52f))
                         .combinedClickable(
-                            onClick = { viewModel.closeQuickSubtitlePreview() },
+                            onClick = {
+                                performKeyHaptic()
+                                viewModel.closeQuickSubtitlePreview()
+                            },
                             onLongClick = copySubtitleText
                         )
                         .padding(14.dp)
@@ -17787,7 +17949,7 @@ fun QuickSubtitleScreen(
                         rotatedSubtitleText(
                             AnnotatedString(subtitleText),
                             subtitleTextColor,
-                            (subtitleSize * 1.25f).coerceIn(36f, 140f),
+                            (subtitleSize * 1.25f).coerceIn(36f, fullscreenPreviewFontSizeMax),
                             18f,
                             1.36f,
                             Modifier
@@ -20221,6 +20383,7 @@ private fun RunningStripTopBarToggle(
     contentColor: Color,
     onToggle: () -> Unit
 ) {
+    val hapticToggle = rememberKigttsHapticClick(onToggle)
     val micIcon = when {
         ttsDisabled -> "mic_off"
         pushToTalkMode && pushToTalkPressed -> "settings_voice"
@@ -20232,7 +20395,7 @@ private fun RunningStripTopBarToggle(
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = rememberRipple(bounded = true),
-                onClick = onToggle
+                onClick = hapticToggle
             ),
         shape = RoundedCornerShape(4.dp),
         color = Color.Transparent,
@@ -22368,6 +22531,12 @@ fun SettingsScreen(
                         }
                     }
                     Md2SettingSwitchRow(
+                        title = "手机横屏使用全宽分组 Tab",
+                        checked = state.forceFullWidthTabsOnPhone,
+                        onCheckedChange = { viewModel.setForceFullWidthTabsOnPhone(it) },
+                        supportingText = "默认仅平板横屏显示图标和名称；开启后手机横屏的便捷字幕列表和音效板分组 Tab 也使用固定宽度的图标加名称样式。"
+                    )
+                    Md2SettingSwitchRow(
                         title = "使用纯色顶栏",
                         checked = state.solidTopBar,
                         onCheckedChange = { viewModel.setSolidTopBar(it) },
@@ -22378,6 +22547,12 @@ fun SettingsScreen(
                         checked = state.quickSubtitleAutoFit,
                         onCheckedChange = { viewModel.setQuickSubtitleAutoFit(it) },
                         supportingText = "开启后：主界面与悬浮窗的便捷字幕大字幕和弹窗预览会在内容过多时自动缩小字号，尽量避免需要上下滑动。"
+                    )
+                    Md2SettingSwitchRow(
+                        title = "允许使用更大的大字幕字体",
+                        checked = state.quickSubtitleAllowLargeFont,
+                        onCheckedChange = { viewModel.setQuickSubtitleAllowLargeFont(it) },
+                        supportingText = "开启后主界面便捷字幕大字幕字号最高可调至 800sp；关闭时超过 96sp 的字号会自动回收到 96sp。"
                     )
                     Md2SettingSwitchRow(
                         title = "使用更紧凑的快捷文本控件",

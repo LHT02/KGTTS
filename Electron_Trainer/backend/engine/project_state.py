@@ -180,6 +180,7 @@ def training_options_from_dict(data: dict[str, Any]) -> TrainingOptions:
     opts.voicepack_avatar = _path_or_none(data.get("voicepack_avatar"))
     opts.normalize_text_append_period = bool(data.get("normalize_text_append_period", True))
     opts.text_normalization_period = str(data.get("text_normalization_period") or DEFAULT_SENTENCE_PERIOD).strip() or DEFAULT_SENTENCE_PERIOD
+    opts.trim_silence = bool(data.get("trim_silence", True))
     return opts
 
 

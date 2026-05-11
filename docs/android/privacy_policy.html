@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KIGTTS 隐私政策</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f4f6f5;
+      --card: #ffffff;
+      --text: #1f2628;
+      --muted: #5d676b;
+      --line: #d9dfdf;
+      --accent: #038387;
+      --accent-soft: #e0f1f1;
+      --shadow: 0 18px 45px rgba(14, 32, 32, .10);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101414;
+        --card: #1d2324;
+        --text: #edf2f2;
+        --muted: #a8b1b2;
+        --line: #30393b;
+        --accent: #33b7b4;
+        --accent-soft: #163536;
+        --shadow: 0 18px 45px rgba(0, 0, 0, .32);
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 8% 0%, var(--accent-soft), transparent 28rem), var(--bg);
+      color: var(--text);
+      font-family: "Microsoft YaHei", "Noto Sans CJK SC", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      line-height: 1.78;
+    }
+    header {
+      padding: 56px 20px 28px;
+      text-align: center;
+    }
+    header .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: color-mix(in srgb, var(--card) 82%, transparent);
+      font-size: 14px;
+    }
+    h1 {
+      margin: 18px 0 10px;
+      font-size: clamp(32px, 5vw, 52px);
+      line-height: 1.12;
+      letter-spacing: .08em;
+    }
+    header p {
+      max-width: 780px;
+      margin: 0 auto;
+      color: var(--muted);
+      font-size: 16px;
+    }
+    main {
+      width: min(960px, calc(100% - 32px));
+      margin: 0 auto 72px;
+      padding: 34px clamp(18px, 4vw, 54px);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--card);
+      box-shadow: var(--shadow);
+    }
+    h2 {
+      margin: 38px 0 12px;
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
+      font-size: 24px;
+    }
+    h2:first-child {
+      margin-top: 0;
+      border-top: 0;
+    }
+    h3 {
+      margin: 26px 0 8px;
+      color: var(--accent);
+      font-size: 18px;
+    }
+    p, li {
+      font-size: 16px;
+    }
+    p {
+      margin: 10px 0;
+    }
+    ul {
+      margin: 8px 0 12px;
+      padding-left: 1.4em;
+    }
+    strong {
+      color: var(--accent);
+    }
+    code {
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: var(--accent-soft);
+      color: var(--text);
+      font-family: "Cascadia Mono", "Consolas", monospace;
+    }
+    table {
+      width: 100%;
+      margin: 16px 0;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--accent-soft);
+      color: var(--text);
+    }
+    tr:last-child td {
+      border-bottom: 0;
+    }
+    .note {
+      margin: 18px 0;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      border-radius: 12px;
+      background: var(--accent-soft);
+      color: var(--text);
+    }
+    footer {
+      width: min(960px, calc(100% - 32px));
+      margin: -40px auto 60px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="badge">Android 应用 · 隐私政策 · 2026-05-09</div>
+    <h1>KIGTTS 隐私政策</h1>
+    <p>本页面适用于 Android 应用 KIGTTS（包名：<code>com.lhtstudio.kigtts.app</code>）。KIGTTS 默认以设备本地处理为主，除非用户主动下载、分享、打开外链或跳转第三方应用，否则不会把用户内容上传到开发者自建服务器。</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>1. 个人信息处理者</h2>
+      <ul>
+        <li>应用名称：KIGTTS</li>
+        <li>应用包名：<code>com.lhtstudio.kigtts.app</code></li>
+        <li>个人信息处理者 / 应用提供者：KIGTTS 项目维护者（LHTStudio）</li>
+        <li>反馈渠道：可通过 KIGTTS 项目的公开仓库、发布页或应用发布渠道提交问题反馈。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>2. 我们处理哪些数据</h2>
+      <h3>2.1 麦克风音频</h3>
+      <p>当你启用语音识别、按住说话、开关模式、说话人验证、音频测试等功能时，应用会读取麦克风音频，用于本地实时语音识别、字幕上屏、TTS 前处理、语音增强、VAD、降噪、回声处理、说话人验证和音频测试。</p>
+      <p>这些音频默认在设备本地处理。KIGTTS 不会默认把麦克风音频上传到开发者自建服务器。</p>
+
+      <h3>2.2 相机画面、图片和二维码内容</h3>
+      <p>当你使用二维码扫描功能时，应用会访问相机画面；当你主动选择图片进行识别时，应用会读取你选择的图片，用于在本地识别二维码或条码内容，并根据二维码类型提示打开网页、复制内容或跳转第三方应用处理。</p>
+
+      <h3>2.3 你主动导入、选择或创建的文件</h3>
+      <p>当你使用内建文件管理器、系统文件选择器、系统图库、语音包安装、音效导入、预设导入导出、名片背景图设置等功能时，应用可能读取你主动选择的文件或目录。这类文件可能包括语音包、资源包、便捷字幕预设、音效板预设、音频文件、名片背景图、日志文件和导出的预设文件。</p>
+
+      <h3>2.4 你在应用内创建或保存的内容</h3>
+      <p>KIGTTS 会在设备本地保存你主动创建、编辑或触发的内容，例如便捷字幕分组、快捷文本、快捷名片、音效板配置、语音识别结果、字幕历史、说话人验证样本、悬浮窗设置、音频设置、资源包状态和应用日志。</p>
+
+      <h3>2.5 已安装应用列表和快捷方式信息</h3>
+      <p>当你添加悬浮窗启动器应用、配置第三方快捷方式或配置音量热键目标时，KIGTTS 可能读取设备中可启动应用的名称、包名、图标和系统公开的启动入口信息。这些信息默认仅在本地使用，不会上传到开发者自建服务器。</p>
+
+      <h3>2.6 无障碍相关数据</h3>
+      <p>当且仅当你主动开启“KIGTTS 音量热键辅助”无障碍服务后，应用会使用无障碍能力更稳定地监听音量键序列，并在你主动触发“QQ 扫一扫（无障碍）”时辅助识别 QQ 当前界面节点并执行必要点击或手势。KIGTTS 不会使用无障碍功能读取聊天内容、密码、支付密码或其它非本应用功能所需的信息。</p>
+
+      <h3>2.7 蓝牙媒体标题字幕</h3>
+      <p>如果你主动开启“蓝牙媒体标题字幕”功能，KIGTTS 会把当前大字幕内容写入 Android 系统媒体会话的标题信息，让部分蓝牙歌词屏、车机、小屏设备或系统媒体界面把当前字幕显示为媒体标题。该功能可能会覆盖其它媒体应用显示的标题信息。</p>
+
+      <h3>2.8 权限状态、设备状态和运行日志</h3>
+      <p>为了完成上述功能，KIGTTS 可能读取或记录权限状态、音频设备类型、音量变化状态、当前 TTS/ASR/VAD/语音包配置、应用运行日志和错误日志。日志默认保存在本地，只有当你主动分享日志时，日志内容才会发送给你选择的目标应用或联系人。</p>
+    </section>
+
+    <section>
+      <h2>3. 我们如何使用这些数据</h2>
+      <p>我们仅将上述数据用于实现你可见、可预期并主动启用的功能，包括本地语音识别、字幕显示、TTS 朗读、音频增强、说话人验证、二维码扫描、悬浮窗、热键、第三方快捷方式联动、蓝牙媒体标题字幕、本地日志记录和故障排查。</p>
+      <p>KIGTTS 不会将上述数据用于广告画像、商业营销画像或与本应用功能无关的自动化决策。</p>
+    </section>
+
+    <section>
+      <h2>4. 数据是否会上传、共享或转让</h2>
+      <p>默认情况下，KIGTTS 不提供开发者自建账号系统、云端同步系统、广告系统或统计后台，不会默认把你的音频、图片、文本、名片、音效、预设、说话人样本或应用列表上传到开发者自建服务器。</p>
+      <p>当你主动下载语音识别资源包、Kokoro 资源包或打开下载源时，应用会访问你选择的下载源，例如魔搭、Hugging Face、HF-Mirror 或你自定义的资源地址。下载源服务器可能接收必要的网络请求信息。</p>
+      <p>当你主动使用系统分享面板、打开二维码网址、跳转第三方应用、导出预设或分享日志时，相关数据会被发送给你选择的目标应用、网站或联系人。</p>
+      <p>KIGTTS 使用 Android 系统组件和若干第三方开源 / 本地功能组件来完成基础功能，例如 AndroidX、CameraX、ML Kit Barcode Scanning、ZXing、ONNX Runtime、sherpa-onnx、CanHub Image Cropper、Apache Commons Compress、XZ、Material Components 等。这些组件主要用于界面、相机预览、二维码识别、模型推理、图片裁剪、压缩包处理和本地音频能力。</p>
+      <p>KIGTTS 不会出售你的个人信息，也不会在未经你同意的情况下公开披露你的个人信息。若因法律法规、行政或司法机关依法要求必须提供相关信息，我们会在符合法律要求的范围内处理。</p>
+    </section>
+
+    <section>
+      <h2>5. 权限说明</h2>
+      <table>
+        <thead>
+          <tr><th>权限或能力</th><th>用途</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>麦克风</td><td>语音识别、按住说话、音频测试、说话人验证。</td></tr>
+          <tr><td>相机</td><td>二维码扫描。</td></tr>
+          <tr><td>图片 / 音频 / 存储读取</td><td>导入图片、音频、预设、语音包、资源包，选择名片背景图。</td></tr>
+          <tr><td>悬浮窗</td><td>在其它应用上方显示 KIGTTS 悬浮控件、迷你控件和引导窗口。</td></tr>
+          <tr><td>通知 / 前台服务</td><td>保持悬浮窗、音量热键、实时语音链路等功能运行并显示系统提示。</td></tr>
+          <tr><td>无障碍</td><td>仅在你主动开启后，用于稳定监听音量键和 QQ 扫一扫直达辅助。</td></tr>
+          <tr><td>网络</td><td>下载资源包、打开外链、访问你配置的下载源或二维码网址。</td></tr>
+          <tr><td>唤醒锁 / 前台服务类型</td><td>在语音、悬浮窗、热键或媒体标题字幕相关功能运行时维持必要的后台任务。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>6. 你的选择与控制</h2>
+      <ul>
+        <li>在系统设置中关闭麦克风、相机、媒体读取、通知、悬浮窗或无障碍权限。</li>
+        <li>在应用设置中关闭蓝牙媒体标题字幕、音量热键、无障碍稳定监听、快捷文本触发音效等可选功能。</li>
+        <li>在应用内删除便捷字幕、名片、音效、语音包、资源包、历史记录、日志或预设。</li>
+        <li>使用系统设置清除 KIGTTS 应用数据，或直接卸载 KIGTTS。</li>
+        <li>删除你在外部目录中保存或导出的文件。</li>
+      </ul>
+      <div class="note">由于 KIGTTS 默认不建立开发者服务器端账户和云端存储，我们通常无法代你远程删除设备本地数据。你可以直接在设备本地完成删除。</div>
+    </section>
+
+    <section>
+      <h2>7. 数据存储和保留</h2>
+      <p>KIGTTS 会把设置、预设、音效、名片、日志、导入资源和部分运行状态保存在设备本地应用目录或你主动选择的目录中。这些数据通常会保留到你在应用内手动删除、清除应用数据、卸载应用或删除外部文件为止。</p>
+      <p>如果你将文件导出到外部目录或分享给第三方应用，导出后的副本将不再受 KIGTTS 应用内删除操作控制。</p>
+    </section>
+
+    <section>
+      <h2>8. 数据安全</h2>
+      <p>KIGTTS 尽量按最小必要原则设计功能：核心语音识别、字幕、TTS、音频处理和二维码识别以本地处理为主；权限按功能需要请求；无障碍功能默认关闭；不默认接入开发者自建云端收集系统、广告系统或统计后台；导入、导出、分享等跨应用行为需要你主动触发。</p>
+      <p>但任何移动设备、操作系统、第三方应用、蓝牙设备、存储介质或网络环境都不可能绝对零风险。请根据自己的设备安全状态谨慎使用相关功能。</p>
+    </section>
+
+    <section>
+      <h2>9. 未成年人说明</h2>
+      <p>KIGTTS 不以未成年人为主要目标用户。如未成年人需要使用本应用，建议在监护人知情和指导下使用。监护人可以通过系统权限管理、应用内删除、清除应用数据或卸载应用来管理相关内容和权限。</p>
+    </section>
+
+    <section>
+      <h2>10. 隐私政策的更新</h2>
+      <p>如果 KIGTTS 的功能、权限使用方式、数据处理方式或第三方组件发生实质变化，我们可能更新本隐私政策，并在应用内、仓库文档、网页版或发布说明中同步更新。</p>
+      <p>更新后的版本以最新发布日期为准。继续使用相关功能，即表示你已了解更新后的政策内容；如果你不同意相关变化，可以停止使用对应功能、关闭权限或卸载应用。</p>
+    </section>
+  </main>
+
+  <footer>KIGTTS Privacy Policy · Android · Updated 2026-05-09</footer>
+</body>
+</html>

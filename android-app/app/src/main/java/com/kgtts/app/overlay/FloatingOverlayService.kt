@@ -3235,7 +3235,7 @@ class FloatingOverlayService : Service() {
                         if (quickCards.isEmpty()) null else quickCards.getOrNull(pager?.currentItem ?: 0)
                     val cachedHeight = miniQuickCardPageHeights[miniQuickCardHeightKey(currentCard)]
                     val targetHeight = if (isPhoneLandscapeUi()) {
-                        landscapeOverlayContentHeight()
+                        landscapeOverlayContentHeight() + dp(16)
                     } else {
                         when {
                             cachedHeight != null -> cachedHeight + paddingTop + paddingBottom
@@ -3269,6 +3269,8 @@ class FloatingOverlayService : Service() {
                     adapter = miniQuickCardPagerAdapter
                     offscreenPageLimit = 1
                     overScrollMode = View.OVER_SCROLL_NEVER
+                    clipChildren = false
+                    clipToPadding = false
                     (getChildAt(0) as? RecyclerView)?.apply {
                         overScrollMode = View.OVER_SCROLL_NEVER
                         clipChildren = false
@@ -7205,7 +7207,7 @@ class FloatingOverlayService : Service() {
     private fun createMiniQuickCardPage(card: QuickCard?): View {
         val landscapePhone = isPhoneLandscapeUi()
         val contentWidth = miniQuickCardPageContentWidth(landscapePhone)
-        val verticalPadding = if (landscapePhone) 0 else dp(10)
+        val verticalPadding = if (landscapePhone) dp(8) else dp(10)
         return FrameLayout(this).apply {
             clipChildren = false
             clipToPadding = false

@@ -781,9 +781,27 @@ def _probe_nvidia_smi() -> Dict[str, str]:
     }
 
 
-def _probe_env_python(python_path: Path) -> Dict[str, Any]:
+def _probe_env_python(python_path: Path, *, require_standard_prepare: bool = False) -> Dict[str, Any]:
     env = _pip_env(python_path)
-    probe_code = """
+    standard_prepare_probe = (
+        """
+import librosa
+import scipy
+import soundfile
+import sherpa_onnx
+
+payload.update({
+    "librosa_version": getattr(librosa, "__version__", ""),
+    "scipy_version": getattr(scipy, "__version__", ""),
+    "soundfile_version": getattr(soundfile, "__version__", ""),
+    "sherpa_onnx_path": getattr(sherpa_onnx, "__file__", ""),
+})
+"""
+        if require_standard_prepare
+        else ""
+    )
+    probe_code = (
+        """
 import importlib
 import json
 
@@ -809,8 +827,12 @@ payload = {
     "pytorch_lightning_version": getattr(pytorch_lightning, "__version__", ""),
     "piper_train_path": getattr(piper_train, "__file__", ""),
 }
+"""
+        + standard_prepare_probe
+        + """
 print(json.dumps(payload, ensure_ascii=False))
 """
+    )
     code, output = _run_command([str(python_path), "-c", probe_code], env=env, cwd=python_path.parent, timeout=240)
     if code != 0:
         trimmed = _trim_output(output)
@@ -829,6 +851,10 @@ print(json.dumps(payload, ensure_ascii=False))
         return json.loads(last_line)
     except Exception as exc:
         raise RuntimeError(f"运行时探测输出无法解析: {last_line}") from exc
+
+
+def _probe_piper_runtime_python(python_path: Path) -> Dict[str, Any]:
+    return _probe_env_python(python_path, require_standard_prepare=True)
 
 
 def _download_file_with_progress(
@@ -1305,7 +1331,7 @@ def describe_piper_runtime() -> Dict[str, Any]:
         )
 
     try:
-        probe = _probe_env_python(python_path)
+        probe = _probe_piper_runtime_python(python_path)
     except Exception as exc:
         return _build_piper_runtime_status(
             available=False,
@@ -1691,7 +1717,7 @@ def install_piper_runtime(
         extract_dirname="piper_env_extract",
         progress=progress,
         force=force,
-        probe_python=_probe_env_python,
+        probe_python=_probe_piper_runtime_python,
         local_archive_path=local_archive_path,
     )
     _write_piper_runtime_meta(

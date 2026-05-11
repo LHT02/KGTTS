@@ -113,6 +113,8 @@ object UserPrefs {
     private val KEY_OVERLAY_THEME_MODE = intPreferencesKey("overlay_theme_mode")
     private val KEY_FONT_SCALE_BLOCK_MODE = intPreferencesKey("font_scale_block_mode")
     private val KEY_HAPTIC_FEEDBACK_ENABLED = booleanPreferencesKey("haptic_feedback_enabled")
+    private val KEY_FORCE_FULL_WIDTH_TABS_ON_PHONE =
+        booleanPreferencesKey("force_full_width_tabs_on_phone")
     private val KEY_DRAWING_SAVE_RELATIVE_PATH = stringPreferencesKey("drawing_save_relative_path")
     private val KEY_QUICK_CARD_AUTO_SAVE_ON_EXIT = booleanPreferencesKey("quick_card_auto_save_on_exit")
     private val KEY_USE_BUILTIN_FILE_MANAGER = booleanPreferencesKey("use_builtin_file_manager")
@@ -151,6 +153,8 @@ object UserPrefs {
     private val KEY_ALLOW_QUICK_TEXT_TRIGGER_SOUNDBOARD = booleanPreferencesKey("allow_quick_text_trigger_soundboard")
     private val KEY_QUICK_SUBTITLE_INTERRUPT_QUEUE = booleanPreferencesKey("quick_subtitle_interrupt_queue")
     private val KEY_QUICK_SUBTITLE_AUTO_FIT = booleanPreferencesKey("quick_subtitle_auto_fit")
+    private val KEY_QUICK_SUBTITLE_ALLOW_LARGE_FONT =
+        booleanPreferencesKey("quick_subtitle_allow_large_font")
     private val KEY_QUICK_SUBTITLE_COMPACT_CONTROLS = booleanPreferencesKey("quick_subtitle_compact_controls")
     private val KEY_QUICK_SUBTITLE_KEEP_INPUT_PREVIEW =
         booleanPreferencesKey("quick_subtitle_keep_input_preview")
@@ -208,6 +212,7 @@ object UserPrefs {
         val overlayThemeMode: Int = THEME_MODE_FOLLOW_SYSTEM,
         val fontScaleBlockMode: Int = FONT_SCALE_BLOCK_ICONS_ONLY,
         val hapticFeedbackEnabled: Boolean = true,
+        val forceFullWidthTabsOnPhone: Boolean = false,
         val drawingSaveRelativePath: String = DEFAULT_DRAWING_SAVE_RELATIVE_PATH,
         val quickCardAutoSaveOnExit: Boolean = false,
         val useBuiltinFileManager: Boolean = true,
@@ -234,6 +239,7 @@ object UserPrefs {
         val allowQuickTextTriggerSoundboard: Boolean = false,
         val quickSubtitleInterruptQueue: Boolean = true,
         val quickSubtitleAutoFit: Boolean = true,
+        val quickSubtitleAllowLargeFont: Boolean = false,
         val quickSubtitleCompactControls: Boolean = false,
         val quickSubtitleKeepInputPreview: Boolean = true,
         val bluetoothMediaTitleSubtitle: Boolean = false,
@@ -409,6 +415,7 @@ object UserPrefs {
                 this[KEY_FONT_SCALE_BLOCK_MODE] ?: FONT_SCALE_BLOCK_ICONS_ONLY
             ),
             hapticFeedbackEnabled = this[KEY_HAPTIC_FEEDBACK_ENABLED] ?: true,
+            forceFullWidthTabsOnPhone = this[KEY_FORCE_FULL_WIDTH_TABS_ON_PHONE] ?: false,
             drawingSaveRelativePath = (this[KEY_DRAWING_SAVE_RELATIVE_PATH]
                 ?: DEFAULT_DRAWING_SAVE_RELATIVE_PATH).ifBlank { DEFAULT_DRAWING_SAVE_RELATIVE_PATH },
             quickCardAutoSaveOnExit = this[KEY_QUICK_CARD_AUTO_SAVE_ON_EXIT] ?: false,
@@ -444,6 +451,7 @@ object UserPrefs {
             allowQuickTextTriggerSoundboard = this[KEY_ALLOW_QUICK_TEXT_TRIGGER_SOUNDBOARD] ?: false,
             quickSubtitleInterruptQueue = this[KEY_QUICK_SUBTITLE_INTERRUPT_QUEUE] ?: true,
             quickSubtitleAutoFit = this[KEY_QUICK_SUBTITLE_AUTO_FIT] ?: true,
+            quickSubtitleAllowLargeFont = this[KEY_QUICK_SUBTITLE_ALLOW_LARGE_FONT] ?: false,
             quickSubtitleCompactControls = this[KEY_QUICK_SUBTITLE_COMPACT_CONTROLS] ?: false,
             quickSubtitleKeepInputPreview = this[KEY_QUICK_SUBTITLE_KEEP_INPUT_PREVIEW] ?: true,
             bluetoothMediaTitleSubtitle = this[KEY_BLUETOOTH_MEDIA_TITLE_SUBTITLE] ?: false,
@@ -707,6 +715,12 @@ object UserPrefs {
         }
     }
 
+    suspend fun setForceFullWidthTabsOnPhone(context: Context, enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_FORCE_FULL_WIDTH_TABS_ON_PHONE] = enabled
+        }
+    }
+
     suspend fun setDrawingSaveRelativePath(context: Context, path: String) {
         context.dataStore.edit { prefs ->
             prefs[KEY_DRAWING_SAVE_RELATIVE_PATH] =
@@ -855,6 +869,12 @@ object UserPrefs {
     suspend fun setQuickSubtitleAutoFit(context: Context, enabled: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[KEY_QUICK_SUBTITLE_AUTO_FIT] = enabled
+        }
+    }
+
+    suspend fun setQuickSubtitleAllowLargeFont(context: Context, enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_QUICK_SUBTITLE_ALLOW_LARGE_FONT] = enabled
         }
     }
 
