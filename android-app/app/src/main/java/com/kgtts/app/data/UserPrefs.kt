@@ -153,6 +153,8 @@ object UserPrefs {
     private val KEY_ALLOW_QUICK_TEXT_TRIGGER_SOUNDBOARD = booleanPreferencesKey("allow_quick_text_trigger_soundboard")
     private val KEY_QUICK_SUBTITLE_INTERRUPT_QUEUE = booleanPreferencesKey("quick_subtitle_interrupt_queue")
     private val KEY_QUICK_SUBTITLE_AUTO_FIT = booleanPreferencesKey("quick_subtitle_auto_fit")
+    private val KEY_QUICK_SUBTITLE_ALLOW_LARGE_FONT =
+        booleanPreferencesKey("quick_subtitle_allow_large_font")
     private val KEY_QUICK_SUBTITLE_COMPACT_CONTROLS = booleanPreferencesKey("quick_subtitle_compact_controls")
     private val KEY_QUICK_SUBTITLE_KEEP_INPUT_PREVIEW =
         booleanPreferencesKey("quick_subtitle_keep_input_preview")
@@ -237,6 +239,7 @@ object UserPrefs {
         val allowQuickTextTriggerSoundboard: Boolean = false,
         val quickSubtitleInterruptQueue: Boolean = true,
         val quickSubtitleAutoFit: Boolean = true,
+        val quickSubtitleAllowLargeFont: Boolean = false,
         val quickSubtitleCompactControls: Boolean = false,
         val quickSubtitleKeepInputPreview: Boolean = true,
         val bluetoothMediaTitleSubtitle: Boolean = false,
@@ -448,6 +451,7 @@ object UserPrefs {
             allowQuickTextTriggerSoundboard = this[KEY_ALLOW_QUICK_TEXT_TRIGGER_SOUNDBOARD] ?: false,
             quickSubtitleInterruptQueue = this[KEY_QUICK_SUBTITLE_INTERRUPT_QUEUE] ?: true,
             quickSubtitleAutoFit = this[KEY_QUICK_SUBTITLE_AUTO_FIT] ?: true,
+            quickSubtitleAllowLargeFont = this[KEY_QUICK_SUBTITLE_ALLOW_LARGE_FONT] ?: false,
             quickSubtitleCompactControls = this[KEY_QUICK_SUBTITLE_COMPACT_CONTROLS] ?: false,
             quickSubtitleKeepInputPreview = this[KEY_QUICK_SUBTITLE_KEEP_INPUT_PREVIEW] ?: true,
             bluetoothMediaTitleSubtitle = this[KEY_BLUETOOTH_MEDIA_TITLE_SUBTITLE] ?: false,
@@ -865,6 +869,12 @@ object UserPrefs {
     suspend fun setQuickSubtitleAutoFit(context: Context, enabled: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[KEY_QUICK_SUBTITLE_AUTO_FIT] = enabled
+        }
+    }
+
+    suspend fun setQuickSubtitleAllowLargeFont(context: Context, enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_QUICK_SUBTITLE_ALLOW_LARGE_FONT] = enabled
         }
     }
 
