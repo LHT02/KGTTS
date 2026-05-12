@@ -12,7 +12,7 @@ sys.path.insert(0, str(BASE_DIR))
 from engine.config import DistillOptions, DistillTextSource, ProjectPaths, TrainingOptions, VoxCpmDistillOptions  # type: ignore
 from engine.gsv_distill import scan_gsv_models, validate_gsv_root  # type: ignore
 from engine.audio_validation import is_audio_file_usable  # type: ignore
-from engine.project_state import load_project_config, read_metadata_entries  # type: ignore
+from engine.project_state import load_project_config, read_metadata_entries, resolve_project_file_path  # type: ignore
 from engine.runtime_manager import (  # type: ignore
     describe_piper_runtime,
     describe_piper_cuda_runtime,
@@ -469,7 +469,15 @@ def _handle_inspect_training_project(req_id: str, payload: Dict[str, Any]) -> No
         raw_input_audio = config.get("input_audio") or []
         if not isinstance(raw_input_audio, list):
             raw_input_audio = []
-        input_audio = [Path(str(item)) for item in raw_input_audio if str(item).strip()]
+        input_audio = [
+            resolve_project_file_path(
+                project_dir,
+                Path(str(item)),
+                extra_dirs=[project_dir / "work" / "input_audio"],
+            )
+            for item in raw_input_audio
+            if str(item).strip()
+        ]
         input_audio_existing = [path for path in input_audio if path.exists()]
         metadata_error = ""
         try:

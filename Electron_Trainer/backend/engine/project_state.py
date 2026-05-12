@@ -37,9 +37,56 @@ def _serialize_dataclass(obj: Any) -> dict[str, Any]:
     return result
 
 
+def _work_relative_candidate(project_root: Path, path: Path) -> Optional[Path]:
+    parts = path.parts
+    for index, part in enumerate(parts):
+        if part.lower() == "work" and index + 1 < len(parts):
+            return project_root / "work" / Path(*parts[index + 1 :])
+    return None
+
+
+def resolve_project_file_path(project_root: Path, raw_path: Path, extra_dirs: Iterable[Path] = ()) -> Path:
+    if raw_path.exists():
+        return raw_path
+
+    candidates: list[Path] = []
+    if raw_path.is_absolute():
+        work_candidate = _work_relative_candidate(project_root, raw_path)
+        if work_candidate is not None:
+            candidates.append(work_candidate)
+    else:
+        candidates.extend([project_root / raw_path, project_root / "work" / raw_path])
+
+    candidates.extend(directory / raw_path.name for directory in extra_dirs)
+    candidates.extend(
+        [
+            project_root / "work" / "segments" / raw_path.name,
+            project_root / "work" / "processed" / raw_path.name,
+            project_root / "work" / "input_audio" / raw_path.name,
+            project_root / "work" / "distill_corpus" / "wavs" / raw_path.name,
+            project_root / "work" / "voxcpm_corpus" / "wavs" / raw_path.name,
+        ]
+    )
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.exists():
+            return candidate
+    return raw_path
+
+
+def resolve_project_audio_path(project_root: Path, raw_path: Path) -> Path:
+    return resolve_project_file_path(project_root, raw_path)
+
+
 def read_metadata_entries(metadata_csv: Path) -> list[tuple[Path, str]]:
     if not metadata_csv.exists():
         raise RuntimeError("这个项目缺少训练文本记录，无法继续训练。")
+    project_root = metadata_csv.parent.parent if metadata_csv.parent.name.lower() == "work" else metadata_csv.parent
     entries: list[tuple[Path, str]] = []
     with metadata_csv.open("r", encoding="utf-8") as handle:
         for raw in handle:
@@ -53,6 +100,7 @@ def read_metadata_entries(metadata_csv: Path) -> list[tuple[Path, str]]:
             audio_path = Path(audio_raw)
             if not audio_path.is_absolute():
                 audio_path = metadata_csv.parent / audio_path
+            audio_path = resolve_project_audio_path(project_root, audio_path)
             entries.append((audio_path, text))
     if not entries:
         raise RuntimeError("这个项目没有可用的训练文本，无法继续训练。")
