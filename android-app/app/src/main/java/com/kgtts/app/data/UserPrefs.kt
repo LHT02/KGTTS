@@ -115,6 +115,7 @@ object UserPrefs {
     private val KEY_HAPTIC_FEEDBACK_ENABLED = booleanPreferencesKey("haptic_feedback_enabled")
     private val KEY_FORCE_FULL_WIDTH_TABS_ON_PHONE =
         booleanPreferencesKey("force_full_width_tabs_on_phone")
+    private val KEY_INTERNAL_WEBVIEW_ENABLED = booleanPreferencesKey("internal_webview_enabled")
     private val KEY_DRAWING_SAVE_RELATIVE_PATH = stringPreferencesKey("drawing_save_relative_path")
     private val KEY_QUICK_CARD_AUTO_SAVE_ON_EXIT = booleanPreferencesKey("quick_card_auto_save_on_exit")
     private val KEY_USE_BUILTIN_FILE_MANAGER = booleanPreferencesKey("use_builtin_file_manager")
@@ -156,6 +157,8 @@ object UserPrefs {
     private val KEY_QUICK_SUBTITLE_ALLOW_LARGE_FONT =
         booleanPreferencesKey("quick_subtitle_allow_large_font")
     private val KEY_QUICK_SUBTITLE_COMPACT_CONTROLS = booleanPreferencesKey("quick_subtitle_compact_controls")
+    private val KEY_QUICK_SUBTITLE_LIST_POPUP_GRID_MODE =
+        booleanPreferencesKey("quick_subtitle_list_popup_grid_mode")
     private val KEY_QUICK_SUBTITLE_KEEP_INPUT_PREVIEW =
         booleanPreferencesKey("quick_subtitle_keep_input_preview")
     private val KEY_BLUETOOTH_MEDIA_TITLE_SUBTITLE =
@@ -213,6 +216,7 @@ object UserPrefs {
         val fontScaleBlockMode: Int = FONT_SCALE_BLOCK_ICONS_ONLY,
         val hapticFeedbackEnabled: Boolean = true,
         val forceFullWidthTabsOnPhone: Boolean = false,
+        val internalWebViewEnabled: Boolean = false,
         val drawingSaveRelativePath: String = DEFAULT_DRAWING_SAVE_RELATIVE_PATH,
         val quickCardAutoSaveOnExit: Boolean = false,
         val useBuiltinFileManager: Boolean = true,
@@ -241,6 +245,7 @@ object UserPrefs {
         val quickSubtitleAutoFit: Boolean = true,
         val quickSubtitleAllowLargeFont: Boolean = false,
         val quickSubtitleCompactControls: Boolean = false,
+        val quickSubtitleListPopupGridMode: Boolean = true,
         val quickSubtitleKeepInputPreview: Boolean = true,
         val bluetoothMediaTitleSubtitle: Boolean = false,
         val drawingKeepCanvasOrientationToDevice: Boolean = true,
@@ -416,6 +421,7 @@ object UserPrefs {
             ),
             hapticFeedbackEnabled = this[KEY_HAPTIC_FEEDBACK_ENABLED] ?: true,
             forceFullWidthTabsOnPhone = this[KEY_FORCE_FULL_WIDTH_TABS_ON_PHONE] ?: false,
+            internalWebViewEnabled = this[KEY_INTERNAL_WEBVIEW_ENABLED] ?: false,
             drawingSaveRelativePath = (this[KEY_DRAWING_SAVE_RELATIVE_PATH]
                 ?: DEFAULT_DRAWING_SAVE_RELATIVE_PATH).ifBlank { DEFAULT_DRAWING_SAVE_RELATIVE_PATH },
             quickCardAutoSaveOnExit = this[KEY_QUICK_CARD_AUTO_SAVE_ON_EXIT] ?: false,
@@ -453,6 +459,7 @@ object UserPrefs {
             quickSubtitleAutoFit = this[KEY_QUICK_SUBTITLE_AUTO_FIT] ?: true,
             quickSubtitleAllowLargeFont = this[KEY_QUICK_SUBTITLE_ALLOW_LARGE_FONT] ?: false,
             quickSubtitleCompactControls = this[KEY_QUICK_SUBTITLE_COMPACT_CONTROLS] ?: false,
+            quickSubtitleListPopupGridMode = this[KEY_QUICK_SUBTITLE_LIST_POPUP_GRID_MODE] ?: true,
             quickSubtitleKeepInputPreview = this[KEY_QUICK_SUBTITLE_KEEP_INPUT_PREVIEW] ?: true,
             bluetoothMediaTitleSubtitle = this[KEY_BLUETOOTH_MEDIA_TITLE_SUBTITLE] ?: false,
             drawingKeepCanvasOrientationToDevice = this[KEY_DRAWING_KEEP_CANVAS_ORIENTATION_TO_DEVICE] ?: true,
@@ -721,6 +728,12 @@ object UserPrefs {
         }
     }
 
+    suspend fun setInternalWebViewEnabled(context: Context, enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_INTERNAL_WEBVIEW_ENABLED] = enabled
+        }
+    }
+
     suspend fun setDrawingSaveRelativePath(context: Context, path: String) {
         context.dataStore.edit { prefs ->
             prefs[KEY_DRAWING_SAVE_RELATIVE_PATH] =
@@ -881,6 +894,12 @@ object UserPrefs {
     suspend fun setQuickSubtitleCompactControls(context: Context, enabled: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[KEY_QUICK_SUBTITLE_COMPACT_CONTROLS] = enabled
+        }
+    }
+
+    suspend fun setQuickSubtitleListPopupGridMode(context: Context, enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_QUICK_SUBTITLE_LIST_POPUP_GRID_MODE] = enabled
         }
     }
 
