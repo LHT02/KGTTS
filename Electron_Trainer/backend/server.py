@@ -3,6 +3,7 @@ import os
 import sys
 import threading
 import traceback
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -12,7 +13,16 @@ sys.path.insert(0, str(BASE_DIR))
 from engine.config import DistillOptions, DistillTextSource, ProjectPaths, TrainingOptions, VoxCpmDistillOptions  # type: ignore
 from engine.gsv_distill import scan_gsv_models, validate_gsv_root  # type: ignore
 from engine.audio_validation import is_audio_file_usable  # type: ignore
-from engine.project_state import load_project_config, read_metadata_entries, resolve_project_file_path  # type: ignore
+from engine.project_state import (  # type: ignore
+    distill_options_from_dict,
+    load_project_config,
+    read_metadata_entries,
+    resolve_project_input_audio,
+    resolve_project_training_options,
+    resolve_project_voxcpm_options,
+    training_options_from_dict,
+    voxcpm_options_from_dict,
+)
 from engine.runtime_manager import (  # type: ignore
     describe_piper_runtime,
     describe_piper_cuda_runtime,
@@ -42,6 +52,18 @@ def _path_or_none(value: Any) -> Path | None:
         return Path(value)
     except Exception:
         return None
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, Path):
+        return str(value)
+    if is_dataclass(value):
+        return {field.name: _json_safe(getattr(value, field.name)) for field in fields(value)}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    return value
 
 
 def _resources_root() -> Optional[Path]:
@@ -469,15 +491,7 @@ def _handle_inspect_training_project(req_id: str, payload: Dict[str, Any]) -> No
         raw_input_audio = config.get("input_audio") or []
         if not isinstance(raw_input_audio, list):
             raw_input_audio = []
-        input_audio = [
-            resolve_project_file_path(
-                project_dir,
-                Path(str(item)),
-                extra_dirs=[project_dir / "work" / "input_audio"],
-            )
-            for item in raw_input_audio
-            if str(item).strip()
-        ]
+        input_audio = resolve_project_input_audio(project_dir, raw_input_audio)
         input_audio_existing = [path for path in input_audio if path.exists()]
         metadata_error = ""
         try:
@@ -504,9 +518,11 @@ def _handle_inspect_training_project(req_id: str, payload: Dict[str, Any]) -> No
         needs_material_rebuild = not direct_train_ready
         can_rebuild_material = False
         material_status = ""
-        training_opts = config.get("training_options") or {}
-        if not isinstance(training_opts, dict):
-            training_opts = {}
+        raw_training_opts = config.get("training_options") or {}
+        if not isinstance(raw_training_opts, dict):
+            raw_training_opts = {}
+        resolved_training_opts = resolve_project_training_options(project_dir, training_options_from_dict(raw_training_opts))
+        training_opts = _json_safe(resolved_training_opts)
         config_summary = f"device={training_opts.get('device', 'cpu')} / batch={training_opts.get('batch_size', '默认')}"
         mode_options: dict[str, Any] = {}
 
@@ -522,7 +538,10 @@ def _handle_inspect_training_project(req_id: str, payload: Dict[str, Any]) -> No
             distill_opts = config.get("distill_options") or {}
             if not isinstance(distill_opts, dict):
                 distill_opts = {}
-            mode_options = distill_opts
+            try:
+                mode_options = _json_safe(distill_options_from_dict(distill_opts))
+            except Exception:
+                mode_options = distill_opts
             config_summary = (
                 f"{distill_opts.get('version', '未知版本')} / {distill_opts.get('speaker', '未知说话人')} / "
                 f"{distill_opts.get('prompt_lang', '未知语言')} / {distill_opts.get('emotion', '未知情感')}"
@@ -538,7 +557,7 @@ def _handle_inspect_training_project(req_id: str, payload: Dict[str, Any]) -> No
             voxcpm_opts = config.get("voxcpm_options") or {}
             if not isinstance(voxcpm_opts, dict):
                 voxcpm_opts = {}
-            mode_options = voxcpm_opts
+            mode_options = _json_safe(resolve_project_voxcpm_options(project_dir, voxcpm_options_from_dict(voxcpm_opts)))
             config_summary = (
                 f"{voxcpm_opts.get('voice_mode', 'description')} / device={voxcpm_opts.get('device', 'cuda')} / "
                 f"denoise={'on' if voxcpm_opts.get('denoise') else 'off'}"

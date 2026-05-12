@@ -16,7 +16,9 @@ from .project_state import (
     load_project_config,
     read_saved_texts_jsonl,
     read_metadata_entries,
-    resolve_project_file_path,
+    resolve_project_input_audio,
+    resolve_project_training_options,
+    resolve_project_voxcpm_options,
     save_project_config,
     training_options_from_dict,
     voxcpm_options_from_dict,
@@ -334,7 +336,12 @@ def run_resume_project_pipeline(
     _ensure_dirs(paths)
     config = load_project_config(paths.project_root)
     mode = str(config.get("mode") or "").strip()
-    opts = training_options_from_dict(config.get("training_options") or {})
+    opts = resolve_project_training_options(paths.project_root, training_options_from_dict(config.get("training_options") or {}))
+    paths.input_audio = [
+        path
+        for path in resolve_project_input_audio(paths.project_root, config.get("input_audio") or [])
+        if path.exists()
+    ]
     archive_voicepack_avatar(paths, opts)
 
     def save_resume_snapshot() -> None:
@@ -351,7 +358,10 @@ def run_resume_project_pipeline(
                     paths,
                     mode,
                     opts,
-                    voxcpm_opts=voxcpm_options_from_dict(config.get("voxcpm_options") or {}),
+                    voxcpm_opts=resolve_project_voxcpm_options(
+                        paths.project_root,
+                        voxcpm_options_from_dict(config.get("voxcpm_options") or {}),
+                    ),
                 )
             elif mode == "piper":
                 save_project_config(paths, mode, opts)
@@ -398,7 +408,10 @@ def run_resume_project_pipeline(
     if mode == "voxcpm_distill":
         from . import voxcpm_distill
 
-        voxcpm_opts = voxcpm_options_from_dict(config.get("voxcpm_options") or {})
+        voxcpm_opts = resolve_project_voxcpm_options(
+            paths.project_root,
+            voxcpm_options_from_dict(config.get("voxcpm_options") or {}),
+        )
         voxcpm_distill.generate_voxcpm_entries(paths, voxcpm_opts, opts, missing_entries, progress)
         still_missing = [(audio_path, text) for audio_path, text in entries if not is_audio_file_usable(audio_path)]
         if still_missing:
@@ -445,12 +458,7 @@ def run_resume_project_pipeline(
     if mode == "piper":
         needs_rerun = bool(metadata_error or metadata_inconsistent or missing_entries or not entries)
         if needs_rerun:
-            stored_audio = [
-                resolve_project_file_path(paths.project_root, Path(str(item)), extra_dirs=[paths.work_dir / "input_audio"])
-                for item in (config.get("input_audio") or [])
-                if str(item).strip()
-            ]
-            stored_audio = [path for path in stored_audio if path.exists()]
+            stored_audio = [path for path in paths.input_audio if path.exists()]
             if not stored_audio:
                 reason = metadata_error or f"缺失或损坏 {len(missing_entries)} 条音频"
                 raise RuntimeError(f"标准训练旧项目需要重新处理，但项目配置中没有可用原始音频：{reason}")
