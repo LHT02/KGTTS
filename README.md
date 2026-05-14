@@ -54,7 +54,13 @@ KIGTTS 是一套面向 **Kigurumi 玩家、漫展用户和不方便说话场景*
 ## 反馈与交流
 
 <p align="center">
-  <a href="https://qm.qq.com/q/JRnqshDOEM"><strong>点击链接加入群聊【KIGTTS反馈群】</strong></a>
+  <a href="https://qm.qq.com/q/JRnqshDOEM">
+    <img src="https://img.shields.io/badge/QQ%20%E5%8F%8D%E9%A6%88%E7%BE%A4-%E7%82%B9%E5%87%BB%E5%8A%A0%E5%85%A5-12B7F5?style=for-the-badge&logo=tencentqq&logoColor=white" alt="点击加入 KIGTTS 反馈群">
+  </a>
+</p>
+
+<p align="center">
+  <sub>点击上方按钮，或使用 QQ 扫描下方二维码加入反馈群。</sub>
 </p>
 
 <p align="center">
