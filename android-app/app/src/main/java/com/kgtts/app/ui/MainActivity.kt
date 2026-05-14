@@ -41,6 +41,8 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceError
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.NumberPicker
@@ -53,6 +55,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.browser.customtabs.CustomTabsClient
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ContentTransform
@@ -498,6 +502,21 @@ private fun openExternalBrowser(context: Context, url: String): Boolean {
     }.getOrDefault(false)
 }
 
+private fun openChromeCustomTab(context: Context, url: String): Boolean {
+    val customTabsPackage = runCatching {
+        CustomTabsClient.getPackageName(context, emptyList())
+    }.getOrNull().takeUnless { it.isNullOrBlank() } ?: return false
+    return runCatching {
+        val customTabsIntent = CustomTabsIntent.Builder()
+            .setShowTitle(true)
+            .build()
+        customTabsIntent.intent.setPackage(customTabsPackage)
+        customTabsIntent.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        customTabsIntent.launchUrl(context, Uri.parse(url))
+        true
+    }.getOrDefault(false)
+}
+
 private fun normalizeDrawingSaveRelativePath(raw: String): String {
     val cleaned = raw
         .trim()
@@ -619,6 +638,7 @@ data class UiState(
     val fontScaleBlockMode: Int = UserPrefs.FONT_SCALE_BLOCK_ICONS_ONLY,
     val hapticFeedbackEnabled: Boolean = true,
     val forceFullWidthTabsOnPhone: Boolean = false,
+    val internalWebViewEnabled: Boolean = false,
     val drawingSaveRelativePath: String = UserPrefs.DEFAULT_DRAWING_SAVE_RELATIVE_PATH,
     val quickCardAutoSaveOnExit: Boolean = false,
     val useBuiltinFileManager: Boolean = true,
@@ -682,7 +702,8 @@ data class ExternalQuickSubtitleRequest(
     val requestId: Long,
     val target: String,
     val text: String,
-    val navigateToPage: Boolean = true
+    val navigateToPage: Boolean = true,
+    val soundboardGroupId: Long? = null
 )
 
 data class ExternalRecordAudioPermissionRequest(
@@ -1073,6 +1094,8 @@ class MainViewModel(
         private set
     var quickSubtitleShowActionButtons by mutableStateOf(true)
         private set
+    var quickSubtitleListPopupLayout by mutableStateOf(QuickSubtitleListPopupLayout.Grid)
+        private set
     var quickSubtitleFontSizeSp by mutableFloatStateOf(56f)
         private set
     var quickSubtitlePreviewVisible by mutableStateOf(false)
@@ -1109,6 +1132,7 @@ class MainViewModel(
     private var soundboardNextItemId = 1L
     private var soundboardSaving = false
     private var pendingSoundboardSavePayload: String? = null
+    private var pendingSoundboardGroupSelectionId: Long? = null
     private var quickCardsNextId = 1L
     private var quickCardsSaving = false
 
@@ -1389,6 +1413,7 @@ class MainViewModel(
             fontScaleBlockMode = settings.fontScaleBlockMode,
             hapticFeedbackEnabled = settings.hapticFeedbackEnabled,
             forceFullWidthTabsOnPhone = settings.forceFullWidthTabsOnPhone,
+            internalWebViewEnabled = settings.internalWebViewEnabled,
             drawingSaveRelativePath = normalizeDrawingSaveRelativePath(settings.drawingSaveRelativePath),
             quickCardAutoSaveOnExit = settings.quickCardAutoSaveOnExit,
             useBuiltinFileManager = settings.useBuiltinFileManager,
@@ -1427,6 +1452,12 @@ class MainViewModel(
             pushToTalkPressed = if (settings.pushToTalkMode) uiState.pushToTalkPressed else false,
             pushToTalkStreamingText = if (settings.pushToTalkMode) uiState.pushToTalkStreamingText else ""
         )
+        quickSubtitleListPopupLayout =
+            if (settings.quickSubtitleListPopupGridMode) {
+                QuickSubtitleListPopupLayout.Grid
+            } else {
+                QuickSubtitleListPopupLayout.List
+            }
         coerceQuickSubtitleFontSizeToCurrentLimit()
         applySettingsToController(settings)
         if (settings.speakerVerifyEnabled && !speakerVerifyEnabled) {
@@ -1576,6 +1607,17 @@ class MainViewModel(
         saveQuickSubtitleConfig()
     }
 
+    fun updateQuickSubtitleListPopupLayout(layout: QuickSubtitleListPopupLayout) {
+        if (quickSubtitleListPopupLayout == layout) return
+        quickSubtitleListPopupLayout = layout
+        viewModelScope.launch {
+            UserPrefs.setQuickSubtitleListPopupGridMode(
+                appContext,
+                layout == QuickSubtitleListPopupLayout.Grid
+            )
+        }
+    }
+
     fun applyQuickSubtitleText(text: String, enqueueSpeak: Boolean = true) {
         val message = text.trim()
         if (message.isEmpty()) return
@@ -1642,7 +1684,8 @@ class MainViewModel(
         requestId: Long,
         target: String,
         text: String,
-        navigateToPage: Boolean = true
+        navigateToPage: Boolean = true,
+        soundboardGroupId: Long? = null
     ) {
         val normalized = text.trim()
         val openPageTarget = isOverlayOpenTarget(target)
@@ -1659,7 +1702,8 @@ class MainViewModel(
             requestId = effectiveRequestId,
             target = target,
             text = normalized,
-            navigateToPage = navigateToPage
+            navigateToPage = navigateToPage,
+            soundboardGroupId = soundboardGroupId
         )
     }
 
@@ -2039,8 +2083,15 @@ class MainViewModel(
     private fun applySoundboardConfig(config: com.lhtstudio.kigtts.app.data.SoundboardConfig) {
         val groups = config.groups.ifEmpty { defaultSoundboardGroups() }
         soundboardGroups = groups
-        soundboardSelectedGroupId =
-            groups.firstOrNull { it.id == config.selectedGroupId }?.id ?: groups.first().id
+        val pendingGroupId = pendingSoundboardGroupSelectionId
+        val selectedId =
+            groups.firstOrNull { it.id == pendingGroupId }?.id
+                ?: groups.firstOrNull { it.id == config.selectedGroupId }?.id
+                ?: groups.first().id
+        soundboardSelectedGroupId = selectedId
+        if (pendingGroupId == selectedId) {
+            pendingSoundboardGroupSelectionId = null
+        }
         soundboardPortraitLayout = config.portraitLayout
         soundboardLandscapeLayout = config.landscapeLayout
         soundboardNextGroupId = maxOf(2L, (groups.maxOfOrNull { it.id } ?: 0L) + 1L)
@@ -2149,6 +2200,16 @@ class MainViewModel(
     fun selectSoundboardGroup(index: Int) {
         val clamped = index.coerceIn(0, soundboardGroups.lastIndex.coerceAtLeast(0))
         val target = soundboardGroups.getOrNull(clamped) ?: return
+        soundboardSelectedGroupId = target.id
+        saveSoundboardConfig()
+    }
+
+    fun selectSoundboardGroupById(groupId: Long) {
+        val target = soundboardGroups.firstOrNull { it.id == groupId }
+        if (target == null) {
+            pendingSoundboardGroupSelectionId = groupId
+            return
+        }
         soundboardSelectedGroupId = target.id
         saveSoundboardConfig()
     }
@@ -4324,6 +4385,13 @@ class MainViewModel(
         }
     }
 
+    fun setInternalWebViewEnabled(enabled: Boolean) {
+        uiState = uiState.copy(internalWebViewEnabled = enabled)
+        viewModelScope.launch {
+            UserPrefs.setInternalWebViewEnabled(appContext, enabled)
+        }
+    }
+
     fun setDrawingSaveRelativePath(path: String) {
         val normalized = normalizeDrawingSaveRelativePath(path)
         uiState = uiState.copy(
@@ -5194,9 +5262,13 @@ private fun QuickCardNavHost(
                     launchSingleTop = true
                 }
             } else {
-                navController.navigate(QuickCardRoutes.web(url)) {
-                    popUpTo(popRoute) { inclusive = true }
-                    launchSingleTop = true
+                if (openChromeCustomTab(context, url)) {
+                    navController.popBackStack(popRoute, inclusive = true)
+                } else {
+                    navController.navigate(QuickCardRoutes.web(url)) {
+                        popUpTo(popRoute) { inclusive = true }
+                        launchSingleTop = true
+                    }
                 }
             }
         }
@@ -5345,6 +5417,7 @@ private fun QuickCardNavHost(
         ) { entry ->
             QuickCardWebViewScreen(
                 url = Uri.decode(entry.arguments?.getString("url").orEmpty()),
+                internalWebViewEnabled = viewModel.uiState.internalWebViewEnabled,
                 onTopBarActionsChange = onTopBarActionsChange
             )
         }
@@ -6735,9 +6808,19 @@ private fun QuickCardScanTextScreen(
 @Composable
 private fun QuickCardWebViewScreen(
     url: String,
+    internalWebViewEnabled: Boolean,
     onTopBarActionsChange: (QuickCardTopBarActions?) -> Unit
 ) {
+    if (!internalWebViewEnabled) {
+        DisposableEffect(Unit) {
+            onTopBarActionsChange(null)
+            onDispose { onTopBarActionsChange(null) }
+        }
+        QuickCardExternalLinkPage(url = url)
+        return
+    }
     var loading by remember(url) { mutableStateOf(true) }
+    var webError by remember(url) { mutableStateOf<QuickCardWebError?>(null) }
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
     val onTopBarActionsChangeState = rememberUpdatedState(onTopBarActionsChange)
     val publishWebActions: () -> Unit = remember {
@@ -6747,7 +6830,11 @@ private fun QuickCardWebViewScreen(
             val canForward = webView?.canGoForward() == true
             onTopBarActionsChangeState.value(
                 QuickCardTopBarActions(
-                    onWebReload = { webViewRef.value?.reload() },
+                    onWebReload = {
+                        webError = null
+                        loading = true
+                        webViewRef.value?.reload()
+                    },
                     onWebBack = if (canBack) ({ webViewRef.value?.goBack() }) else null,
                     onWebForward = if (canForward) ({ webViewRef.value?.goForward() }) else null,
                     canWebReload = webView != null,
@@ -6794,12 +6881,53 @@ private fun QuickCardWebViewScreen(
 
                         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                             loading = true
+                            webError = null
                             publishWebActions()
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             loading = false
                             publishWebActions()
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                            error: WebResourceError?
+                        ) {
+                            if (request?.isForMainFrame == true) {
+                                loading = false
+                                webError = QuickCardWebError(
+                                    url = request.url?.toString().orEmpty().ifBlank { url },
+                                    detail = buildString {
+                                        append("错误代码：")
+                                        append(error?.errorCode ?: 0)
+                                        val description = error?.description?.toString().orEmpty()
+                                        if (description.isNotBlank()) {
+                                            append('\n')
+                                            append(description)
+                                        }
+                                    }
+                                )
+                                publishWebActions()
+                            }
+                        }
+
+                        override fun onReceivedHttpError(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                            errorResponse: WebResourceResponse?
+                        ) {
+                            if (request?.isForMainFrame == true) {
+                                loading = false
+                                val statusCode = errorResponse?.statusCode ?: 0
+                                val reason = errorResponse?.reasonPhrase.orEmpty()
+                                webError = QuickCardWebError(
+                                    url = request.url?.toString().orEmpty().ifBlank { url },
+                                    detail = "HTTP $statusCode${if (reason.isBlank()) "" else " $reason"}"
+                                )
+                                publishWebActions()
+                            }
                         }
                     }
                     loadUrl(url)
@@ -6809,10 +6937,26 @@ private fun QuickCardWebViewScreen(
             update = { webView ->
                 if (!url.equals(webView.url.orEmpty(), ignoreCase = true)) {
                     loading = true
+                    webError = null
                     webView.loadUrl(url)
                 }
             }
         )
+        webError?.let { error ->
+            QuickCardWebErrorPage(
+                error = error,
+                onRetry = {
+                    webError = null
+                    loading = true
+                    webViewRef.value?.loadUrl(error.url)
+                },
+                onOpenExternal = {
+                    if (!openExternalBrowser(it, error.url)) {
+                        toast(it, "无法打开系统浏览器")
+                    }
+                }
+            )
+        }
         AnimatedVisibility(
             visible = loading,
             enter = fadeIn(animationSpec = tween(90)),
@@ -6822,6 +6966,173 @@ private fun QuickCardWebViewScreen(
             LinearProgressIndicator(
                 modifier = Modifier.fillMaxWidth()
             )
+        }
+    }
+}
+
+private data class QuickCardWebError(
+    val url: String,
+    val detail: String
+)
+
+@Composable
+private fun QuickCardExternalLinkPage(url: String) {
+    val context = LocalContext.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 18.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .widthIn(max = 720.dp)
+                .fillMaxWidth(),
+            shape = RoundedCornerShape(UiTokens.Radius),
+            backgroundColor = md2CardContainerColor(),
+            elevation = UiTokens.CardElevation
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                MsIcon(
+                    name = "info",
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(42.dp)
+                )
+                Text(
+                    text = "第三方外部链接",
+                    style = MaterialTheme.typography.h6,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = "您正在访问的是第三方外部链接，并非本软件提供的内容。\n继续访问后，您的一切操作与后果均与本软件无关。",
+                    style = MaterialTheme.typography.body1,
+                    textAlign = TextAlign.Start,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f)
+                )
+                SelectionContainer {
+                    Text(
+                        text = url,
+                        style = MaterialTheme.typography.body2,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(UiTokens.Radius))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.46f))
+                            .padding(12.dp)
+                    )
+                }
+                Md2Button(
+                    onClick = {
+                        if (!openExternalBrowser(context, url)) {
+                            toast(context, "无法打开系统浏览器")
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("使用浏览器打开")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickCardWebErrorPage(
+    error: QuickCardWebError,
+    onRetry: () -> Unit,
+    onOpenExternal: (Context) -> Unit
+) {
+    val context = LocalContext.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 18.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .widthIn(max = 720.dp)
+                .fillMaxWidth(),
+            shape = RoundedCornerShape(UiTokens.Radius),
+            backgroundColor = md2CardContainerColor(),
+            elevation = UiTokens.CardElevation
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                MsIcon(
+                    name = "info",
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(42.dp)
+                )
+                Text(
+                    text = "无法打开此页面",
+                    style = MaterialTheme.typography.h6,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "浏览器报错详细信息",
+                        style = MaterialTheme.typography.subtitle2,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = error.detail.ifBlank { "未知错误" },
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.76f)
+                    )
+                    Text(
+                        text = "网址",
+                        style = MaterialTheme.typography.subtitle2,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    SelectionContainer {
+                        Text(
+                            text = error.url,
+                            style = MaterialTheme.typography.body2,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(UiTokens.Radius))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.46f))
+                                .padding(12.dp)
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Md2OutlinedButton(
+                        onClick = onRetry,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("重试")
+                    }
+                    Md2Button(
+                        onClick = { onOpenExternal(context) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("使用浏览器打开")
+                    }
+                }
+            }
         }
     }
 }
@@ -8940,7 +9251,17 @@ class MainActivity : ComponentActivity() {
                 val target = intent.getStringExtra(OverlayBridge.EXTRA_TARGET) ?: OverlayBridge.TARGET_SUBTITLE
                 val text = intent.getStringExtra(OverlayBridge.EXTRA_TEXT).orEmpty()
                 val navigateToPage = intent.getBooleanExtra(OverlayBridge.EXTRA_NAVIGATE_TO_PAGE, true)
-                viewModel.handleQuickSubtitleLaunchRequest(requestId, target, text, navigateToPage)
+                val soundboardGroupId =
+                    intent.takeIf { it.hasExtra(OverlayBridge.EXTRA_SOUNDBOARD_GROUP_ID) }
+                        ?.getLongExtra(OverlayBridge.EXTRA_SOUNDBOARD_GROUP_ID, Long.MIN_VALUE)
+                        ?.takeIf { it != Long.MIN_VALUE }
+                viewModel.handleQuickSubtitleLaunchRequest(
+                    requestId = requestId,
+                    target = target,
+                    text = text,
+                    navigateToPage = navigateToPage,
+                    soundboardGroupId = soundboardGroupId
+                )
                 setIntent(Intent())
             }
 
@@ -10404,6 +10725,7 @@ fun AppScaffold(viewModel: MainViewModel) {
                 page = pageDrawing
             }
             OverlayBridge.TARGET_OPEN_SOUNDBOARD -> {
+                request.soundboardGroupId?.let { viewModel.selectSoundboardGroupById(it) }
                 page = pageSoundboard
                 if (soundboardRoute != SoundboardRoutes.Main) {
                     soundboardNavController.popBackStack(SoundboardRoutes.Main, inclusive = false)
@@ -13641,8 +13963,10 @@ private fun SoundboardScreen(
     val selectedGroupIndex = viewModel.currentSoundboardGroupIndex().coerceIn(0, groups.lastIndex.coerceAtLeast(0))
     val layoutMode = viewModel.currentSoundboardLayout(isLandscape)
     val groupHintState = rememberGroupSwitchHintState()
+    val performKeyHaptic = rememberKigttsKeyHaptic()
     fun selectSoundboardGroupWithHint(index: Int) {
         if (index !in groups.indices) return
+        performKeyHaptic()
         if (index != selectedGroupIndex && isLandscape) {
             groupHintState.show(groups[index].title.ifBlank { "未命名分组" })
         }
@@ -13694,16 +14018,24 @@ private fun SoundboardScreen(
             elevation = UiTokens.CardElevation
         ) {
             AnimatedContent(
-                targetState = selectedGroupIndex,
+                targetState = selectedGroupIndex to layoutMode,
                 transitionSpec = {
-                    soundboardGroupSwitchTransform(
-                        initialIndex = initialState,
-                        targetIndex = targetState,
-                        isLandscape = isLandscape
-                    )
+                    if (initialState.first == targetState.first && initialState.second != targetState.second) {
+                        ContentTransform(
+                            targetContentEnter = fadeIn(animationSpec = tween(150)),
+                            initialContentExit = fadeOut(animationSpec = tween(120)),
+                            sizeTransform = null
+                        )
+                    } else {
+                        soundboardGroupSwitchTransform(
+                            initialIndex = initialState.first,
+                            targetIndex = targetState.first,
+                            isLandscape = isLandscape
+                        )
+                    }
                 },
                 label = "soundboard_items_switch"
-            ) { targetIndex ->
+            ) { (targetIndex, _) ->
                 val targetItems = groups.getOrNull(targetIndex)?.items.orEmpty()
                 if (targetItems.isEmpty()) {
                     Box(
@@ -14050,11 +14382,15 @@ private fun SoundboardGridItem(
     onPlay: () -> Unit,
     onStop: () -> Unit
 ) {
+    val performKeyHaptic = rememberKigttsKeyHaptic()
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .height(118.dp)
-            .clickable { onPlay() },
+            .clickable {
+                performKeyHaptic()
+                onPlay()
+            },
         shape = RoundedCornerShape(UiTokens.Radius),
         backgroundColor = md2CardContainerColor(),
         elevation = UiTokens.CardElevation
@@ -14111,10 +14447,14 @@ private fun SoundboardListItem(
     onPlay: () -> Unit,
     onStop: () -> Unit
 ) {
+    val performKeyHaptic = rememberKigttsKeyHaptic()
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onPlay() },
+            .clickable {
+                performKeyHaptic()
+                onPlay()
+            },
         shape = RoundedCornerShape(UiTokens.Radius),
         backgroundColor = md2CardContainerColor(),
         elevation = UiTokens.CardElevation
@@ -15829,7 +16169,7 @@ private fun QuickSubtitleMicFab(
     }
 }
 
-private enum class QuickSubtitleListPopupLayout {
+enum class QuickSubtitleListPopupLayout {
     Grid,
     List
 }
@@ -16037,8 +16377,6 @@ private fun QuickSubtitleListDialog(
     var selectedGroupIndex by remember(groups, initialGroupIndex) {
         mutableIntStateOf(initialGroupIndex.coerceIn(0, groups.lastIndex))
     }
-    val currentItems = groups.getOrNull(selectedGroupIndex)?.items.orEmpty()
-    val grid = layoutMode == QuickSubtitleListPopupLayout.Grid
     val content: @Composable (Modifier) -> Unit = { modifier ->
         Card(
             modifier = modifier,
@@ -16046,67 +16384,90 @@ private fun QuickSubtitleListDialog(
             backgroundColor = md2CardContainerColor(),
             elevation = UiTokens.CardElevation
         ) {
-            if (currentItems.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(20.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "当前分组暂无快捷文本",
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else if (grid) {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(138.dp),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(
-                        count = currentItems.size,
-                        key = { index -> "${selectedGroupIndex}_${index}_${currentItems[index]}" }
-                    ) { index ->
-                        val text = currentItems[index]
-                        QuickSubtitlePopupItem(
-                            text = text,
-                            grid = true,
-                            onClick = {
-                                performKeyHaptic()
-                                onSubmit(text)
-                                onDismiss()
-                            }
+            AnimatedContent(
+                targetState = selectedGroupIndex to layoutMode,
+                transitionSpec = {
+                    if (initialState.first == targetState.first && initialState.second != targetState.second) {
+                        ContentTransform(
+                            targetContentEnter = fadeIn(animationSpec = tween(150)),
+                            initialContentExit = fadeOut(animationSpec = tween(120)),
+                            sizeTransform = null
+                        )
+                    } else {
+                        quickSubtitlePopupGroupSwitchTransform(
+                            initialIndex = initialState.first,
+                            targetIndex = targetState.first,
+                            isLandscape = isLandscape
                         )
                     }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    itemsIndexed(
-                        items = currentItems,
-                        key = { index, text -> "${selectedGroupIndex}_${index}_$text" }
-                    ) { _, text ->
-                        QuickSubtitlePopupItem(
-                            text = text,
-                            grid = false,
-                            onClick = {
-                                performKeyHaptic()
-                                onSubmit(text)
-                                onDismiss()
-                            }
+                },
+                label = "quick_subtitle_list_popup_group_switch"
+            ) { (targetGroupIndex, targetLayoutMode) ->
+                val targetItems = groups.getOrNull(targetGroupIndex)?.items.orEmpty()
+                val grid = targetLayoutMode == QuickSubtitleListPopupLayout.Grid
+                if (targetItems.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(20.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "当前分组暂无快捷文本",
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                } else if (grid) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(138.dp),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(
+                            count = targetItems.size,
+                            key = { index -> "${targetGroupIndex}_${index}_${targetItems[index]}" }
+                        ) { index ->
+                            val text = targetItems[index]
+                            QuickSubtitlePopupItem(
+                                text = text,
+                                grid = true,
+                                onClick = {
+                                    performKeyHaptic()
+                                    onSubmit(text)
+                                    onDismiss()
+                                }
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        itemsIndexed(
+                            items = targetItems,
+                            key = { index, text -> "${targetGroupIndex}_${index}_$text" }
+                        ) { _, text ->
+                            QuickSubtitlePopupItem(
+                                text = text,
+                                grid = false,
+                                onClick = {
+                                    performKeyHaptic()
+                                    onSubmit(text)
+                                    onDismiss()
+                                }
+                            )
+                        }
                     }
                 }
             }
         }
     }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -16199,6 +16560,55 @@ private fun QuickSubtitleListDialog(
                 }
             }
         }
+    }
+}
+
+private fun quickSubtitlePopupGroupSwitchTransform(
+    initialIndex: Int,
+    targetIndex: Int,
+    isLandscape: Boolean
+): ContentTransform {
+    val forward = targetIndex >= initialIndex
+    return if (isLandscape) {
+        ContentTransform(
+            targetContentEnter = fadeIn(animationSpec = tween(190)) +
+                slideInVertically(
+                    initialOffsetY = { full ->
+                        val d = kotlin.math.min(full / 3, 54)
+                        if (forward) d else -d
+                    },
+                    animationSpec = tween(210, easing = FastOutSlowInEasing)
+                ),
+            initialContentExit = fadeOut(animationSpec = tween(150)) +
+                slideOutVertically(
+                    targetOffsetY = { full ->
+                        val d = kotlin.math.min(full / 4, 40)
+                        if (forward) -d else d
+                    },
+                    animationSpec = tween(170, easing = FastOutSlowInEasing)
+                ),
+            sizeTransform = null
+        )
+    } else {
+        ContentTransform(
+            targetContentEnter = fadeIn(animationSpec = tween(190)) +
+                slideInHorizontally(
+                    initialOffsetX = { full ->
+                        val d = kotlin.math.min(full / 3, 120)
+                        if (forward) d else -d
+                    },
+                    animationSpec = tween(220, easing = FastOutSlowInEasing)
+                ),
+            initialContentExit = fadeOut(animationSpec = tween(150)) +
+                slideOutHorizontally(
+                    targetOffsetX = { full ->
+                        val d = kotlin.math.min(full / 4, 88)
+                        if (forward) -d else d
+                    },
+                    animationSpec = tween(180, easing = FastOutSlowInEasing)
+                ),
+            sizeTransform = null
+        )
     }
 }
 
@@ -16524,9 +16934,7 @@ fun QuickSubtitleScreen(
     }
     val hasVoice = state.voiceDir != null
     var quickSubtitleListDialogVisible by rememberSaveable { mutableStateOf(false) }
-    var quickSubtitleListDialogLayoutMode by rememberSaveable {
-        mutableStateOf(QuickSubtitleListPopupLayout.Grid)
-    }
+    val quickSubtitleListDialogLayoutMode = viewModel.quickSubtitleListPopupLayout
     val openQuickSubtitleListDialog = {
         performKeyHaptic()
         quickSubtitleListDialogVisible = true
@@ -17909,7 +18317,7 @@ fun QuickSubtitleScreen(
                 initialGroupIndex = selectedGroupIndex,
                 layoutMode = quickSubtitleListDialogLayoutMode,
                 forceFullWidthTabsOnPhone = state.forceFullWidthTabsOnPhone,
-                onLayoutModeChange = { quickSubtitleListDialogLayoutMode = it },
+                onLayoutModeChange = { viewModel.updateQuickSubtitleListPopupLayout(it) },
                 onSelectGroup = { viewModel.selectQuickSubtitleGroup(it) },
                 onDismiss = { quickSubtitleListDialogVisible = false },
                 onSubmit = { text ->
@@ -21432,6 +21840,7 @@ fun SettingsScreen(
     var themeModeExpanded by remember { mutableStateOf(false) }
     var overlayThemeModeExpanded by remember { mutableStateOf(false) }
     var fontScaleBlockModeExpanded by remember { mutableStateOf(false) }
+    var internalWebViewWarningVisible by remember { mutableStateOf(false) }
     var inputTypeExpanded by remember { mutableStateOf(false) }
     var outputTypeExpanded by remember { mutableStateOf(false) }
     var denoiserModeExpanded by remember { mutableStateOf(false) }
@@ -21562,6 +21971,31 @@ fun SettingsScreen(
 
     LaunchedEffect(selectedCategory) {
         scroll.animateScrollTo(0)
+    }
+
+    if (internalWebViewWarningVisible) {
+        AlertDialog(
+            onDismissRequest = { internalWebViewWarningVisible = false },
+            title = { Text("启用内置 WebView") },
+            text = {
+                Text("开启后将允许在软件内置浏览器中访问网页。\n其内容、安全性与本软件无关，相关风险由您自行承担。")
+            },
+            confirmButton = {
+                Md2TextButton(
+                    onClick = {
+                        internalWebViewWarningVisible = false
+                        viewModel.setInternalWebViewEnabled(true)
+                    }
+                ) {
+                    Text("开启")
+                }
+            },
+            dismissButton = {
+                Md2TextButton(onClick = { internalWebViewWarningVisible = false }) {
+                    Text("取消")
+                }
+            }
+        )
     }
 
     @Composable
@@ -22535,6 +22969,18 @@ fun SettingsScreen(
                         checked = state.forceFullWidthTabsOnPhone,
                         onCheckedChange = { viewModel.setForceFullWidthTabsOnPhone(it) },
                         supportingText = "默认仅平板横屏显示图标和名称；开启后手机横屏的便捷字幕列表和音效板分组 Tab 也使用固定宽度的图标加名称样式。"
+                    )
+                    Md2SettingSwitchRow(
+                        title = "启用内置 WebView",
+                        checked = state.internalWebViewEnabled,
+                        onCheckedChange = { enabled ->
+                            if (enabled) {
+                                internalWebViewWarningVisible = true
+                            } else {
+                                viewModel.setInternalWebViewEnabled(false)
+                            }
+                        },
+                        supportingText = "关闭时，二维码扫描得到的第三方网页链接会优先使用 Chrome Custom Tabs；不可用时显示外部链接提示页。"
                     )
                     Md2SettingSwitchRow(
                         title = "使用纯色顶栏",

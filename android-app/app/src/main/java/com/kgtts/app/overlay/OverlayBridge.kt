@@ -16,6 +16,7 @@ object OverlayBridge {
     const val EXTRA_TEXT = "overlay_text"
     const val EXTRA_NAVIGATE_TO_PAGE = "overlay_navigate_to_page"
     const val EXTRA_START_REALTIME_ON_GRANT = "overlay_start_realtime_on_grant"
+    const val EXTRA_SOUNDBOARD_GROUP_ID = "overlay_soundboard_group_id"
 
     const val TARGET_OPEN = "open"
     const val TARGET_SUBTITLE = "subtitle"
@@ -50,6 +51,14 @@ object OverlayBridge {
 
     fun buildOpenPageIntent(context: Context, target: String): Intent {
         return buildQuickSubtitleIntent(context, target, "")
+    }
+
+    fun buildOpenSoundboardIntent(context: Context, groupId: Long? = null): Intent {
+        return buildOpenPageIntent(context, TARGET_OPEN_SOUNDBOARD).apply {
+            if (groupId != null) {
+                putExtra(EXTRA_SOUNDBOARD_GROUP_ID, groupId)
+            }
+        }
     }
 
     fun buildRequestRecordAudioPermissionIntent(

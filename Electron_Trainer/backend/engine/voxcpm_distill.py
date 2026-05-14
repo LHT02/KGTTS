@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from .audio_validation import is_audio_file_usable, split_usable_audio_entries
+from . import training
 from .config import ProjectPaths, TrainingOptions, VoxCpmDistillOptions
 from .gsv_distill import collect_distill_texts
 from .runtime_manager import describe_voxcpm_models, get_voxcpm_python_path
@@ -264,15 +266,83 @@ def _transcribe_reference_audio(
         raise RuntimeError("找不到语音识别模型，请重新安装训练资源包或重新选择模型。")
     if progress:
         progress(progress_stage, 0.0, "高保真克隆：正在转写参考音频...")
-    import librosa
-    import soundfile as sf
 
-    from . import asr
+    prefer_cuda = str(training_opts.device).lower() in {"cuda", "gpu"}
+    piper_python = training._find_piper_python(prefer_cuda=prefer_cuda)  # type: ignore[attr-defined]
+    if not piper_python:
+        raise RuntimeError("参考音频转写需要 Piper 运行时。请先安装 Piper 基础运行时，或在 GPU 训练时安装 Piper CUDA 运行时。")
 
-    engine = asr.OfflineASR(training_opts.asr_model_zip, device="cpu")
-    audio, sr = sf.read(reference_audio)
-    mono = librosa.to_mono(audio.T if getattr(audio, "ndim", 1) > 1 else audio)
-    text, _score = engine.transcribe(mono, sr)
+    backend_root = Path(__file__).resolve().parents[1]
+    helper = backend_root / "tools" / "asr_reference_helper.py"
+    if not helper.exists():
+        raise RuntimeError("参考音频转写组件缺失，请重新安装 KIGTTS Trainer 后再试。")
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="kgtts_ref_asr_"))
+    request_path = temp_dir / "request.json"
+    log_path = temp_dir / "asr_reference.log"
+    request_path.write_text(
+        json.dumps(
+            {
+                "reference_audio": str(reference_audio),
+                "asr_model_zip": str(training_opts.asr_model_zip),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    env = training._piper_env(piper_python)  # type: ignore[attr-defined]
+    env["PYTHONPATH"] = str(backend_root)
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    proc = subprocess.Popen(
+        [str(piper_python), "-u", str(helper), str(request_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        cwd=str(backend_root),
+        creationflags=creationflags,
+        close_fds=True,
+    )
+
+    text = ""
+    error_message = ""
+    with log_path.open("w", encoding="utf-8") as log_file:
+        log_file.write(f"piper_python={piper_python}\n")
+        log_file.write(f"helper={helper}\n")
+        log_file.write(f"pid={proc.pid}\n")
+        log_file.flush()
+        if proc.stdout is not None:
+            for raw_line in proc.stdout:
+                log_file.write(raw_line)
+                log_file.flush()
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except Exception:
+                    continue
+                if event.get("type") == "done":
+                    text = str(event.get("text") or "").strip()
+                elif event.get("type") == "error":
+                    error_message = str(event.get("message") or "")
+                    traceback_text = str(event.get("traceback") or "")
+                    if traceback_text:
+                        log_file.write(traceback_text)
+                        log_file.flush()
+
+    if proc.wait() != 0:
+        if "No module named" in error_message:
+            raise RuntimeError(f"参考音频转写运行时缺少组件：{error_message}。请重新安装对应 Piper 运行时。")
+        raise RuntimeError(error_message or f"参考音频转写失败，详见 {log_path}")
     text = text.strip()
     if not text:
         raise RuntimeError("参考音频 ASR 未识别到有效文本，请手动填写参考文本。")

@@ -261,6 +261,7 @@ class FloatingOverlayService : Service() {
     private var miniQuickListGroupHintHideJob: Job? = null
     private var miniQuickListSelectedGroupId: Long? = null
     private var miniQuickListGridMode = true
+    private var miniSubtitleLastDisplayedText = ""
     private var miniSubtitleBody: LinearLayout? = null
     private var miniQuickCardBody: LinearLayout? = null
     private var miniQuickCardPreviewContainer: FrameLayout? = null
@@ -1017,6 +1018,11 @@ class FloatingOverlayService : Service() {
             holder.root.setOnClickListener {
                 performOverlayKeyHaptic(holder.root)
                 playSoundboardItem(item)
+            }
+            holder.root.setOnLongClickListener {
+                performOverlayKeyHaptic(holder.root)
+                launchSoundboardPage(miniSoundboardSelectedGroupId)
+                true
             }
             holder.actionView.setOnClickListener {
                 performOverlayKeyHaptic(holder.actionView)
@@ -3292,6 +3298,10 @@ class FloatingOverlayService : Service() {
                             }
                         }
                     )
+                    setPageTransformer { page, position ->
+                        page.translationX = 0f
+                        page.alpha = (1f - abs(position)).coerceIn(0f, 1f)
+                    }
                 }
                 addView(
                     miniQuickCardPager,
@@ -3479,7 +3489,7 @@ class FloatingOverlayService : Service() {
                 setOnClickListener {
                     performOverlayKeyHaptic(this)
                     miniQuickListGridMode = !miniQuickListGridMode
-                    refreshMiniQuickTextListOverlayUi()
+                    refreshMiniQuickTextListOverlayUi(animateContent = true)
                 }
             }
         miniQuickListTabsCardView = LinearLayout(this).apply {
@@ -4422,6 +4432,15 @@ class FloatingOverlayService : Service() {
     private fun launchQuickCardPage() {
         hideMiniPanel()
         launchAppPage(OverlayBridge.TARGET_OPEN_QUICK_CARD)
+    }
+
+    private fun launchSoundboardPage(groupId: Long? = null) {
+        hideMiniPanel()
+        runCatching {
+            startActivity(OverlayBridge.buildOpenSoundboardIntent(this, groupId))
+        }.onFailure {
+            AppLogger.e("FloatingOverlayService.launchSoundboardPage failed", it)
+        }
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -5959,12 +5978,30 @@ class FloatingOverlayService : Service() {
         }
     }
 
-    private fun refreshMiniQuickTextListOverlayUi() {
+    private fun refreshMiniQuickTextListOverlayUi(animateContent: Boolean = false) {
         val recycler = miniQuickListRecyclerView ?: return
         val adapter = miniQuickListAdapter ?: return
         val group = selectedMiniQuickTextListGroup()
-        ensureMiniQuickTextListLayoutManager(recycler)
-        adapter.submit(group.items, miniQuickListGridMode)
+        val applyContentUpdate = {
+            ensureMiniQuickTextListLayoutManager(recycler)
+            adapter.submit(group.items, miniQuickListGridMode)
+        }
+        if (animateContent && recycler.visibility == View.VISIBLE) {
+            recycler.animate().cancel()
+            recycler.animate()
+                .alpha(0f)
+                .setDuration(90L)
+                .withEndAction {
+                    applyContentUpdate()
+                    recycler.animate().cancel()
+                    recycler.animate().alpha(1f).setDuration(130L).start()
+                }
+                .start()
+        } else {
+            recycler.animate().cancel()
+            recycler.alpha = 1f
+            applyContentUpdate()
+        }
         miniQuickListLayoutButtonView?.apply {
             text = if (miniQuickListGridMode) "grid_view" else "view_list"
             contentDescription = if (miniQuickListGridMode) "当前宫格，点击切换列表" else "当前列表，点击切换宫格"
@@ -5974,7 +6011,9 @@ class FloatingOverlayService : Service() {
         miniQuickListOverlayView?.requestLayout()
         recycler.post {
             ensureMiniQuickTextListLayoutManager(recycler)
-            adapter.submit(group.items, miniQuickListGridMode)
+            if (!animateContent) {
+                adapter.submit(group.items, miniQuickListGridMode)
+            }
         }
     }
 
@@ -6286,14 +6325,7 @@ class FloatingOverlayService : Service() {
                 }
             }
             requestLayout()
-            applyOverlayQuickSubtitleTextAppearance(
-                textView = this,
-                text = quickSubtitleCurrentText.ifBlank { defaultQuickSubtitleText },
-                maxFontSizeSp = quickSubtitleFontSizeSp,
-                minFontSizeSp = 18f,
-                maxLines = 5,
-                centerVerticallyWhenCentered = true
-            )
+            updateMiniSubtitleTextWithAnimation(this, quickSubtitleCurrentText.ifBlank { defaultQuickSubtitleText })
         }
         miniSubtitleSeekBar?.progress =
             (quickSubtitleFontSizeSp - 28f).roundToInt().coerceIn(0, 68)
@@ -6313,6 +6345,36 @@ class FloatingOverlayService : Service() {
             refreshMiniQuickTextListOverlayUi()
         }
         refreshMiniPreviewUi()
+    }
+
+    private fun updateMiniSubtitleTextWithAnimation(textView: TextView, nextText: String) {
+        fun applyText() {
+            applyOverlayQuickSubtitleTextAppearance(
+                textView = textView,
+                text = nextText,
+                maxFontSizeSp = quickSubtitleFontSizeSp,
+                minFontSizeSp = 18f,
+                maxLines = 5,
+                centerVerticallyWhenCentered = true
+            )
+            miniSubtitleLastDisplayedText = nextText
+        }
+        val changed = miniSubtitleLastDisplayedText.isNotBlank() && miniSubtitleLastDisplayedText != nextText
+        textView.animate().cancel()
+        if (!changed || !textView.isShown) {
+            textView.alpha = 1f
+            applyText()
+            return
+        }
+        textView.animate()
+            .alpha(0f)
+            .setDuration(90L)
+            .withEndAction {
+                applyText()
+                textView.animate().cancel()
+                textView.animate().alpha(1f).setDuration(140L).start()
+            }
+            .start()
     }
 
     private fun refreshMiniQuickCardLayoutMetrics() {
@@ -6841,7 +6903,7 @@ class FloatingOverlayService : Service() {
             miniSoundboardPortraitLayout = next
         }
         saveMiniSoundboardLayout()
-        refreshMiniSoundboardUi()
+        refreshMiniSoundboardUi(animateContent = true)
         updateMiniPanelPosition()
     }
 
@@ -6871,15 +6933,33 @@ class FloatingOverlayService : Service() {
         refreshMiniSoundboardUi()
     }
 
-    private fun refreshMiniSoundboardUi() {
+    private fun refreshMiniSoundboardUi(animateContent: Boolean = false) {
         val body = miniSoundboardBody ?: return
         val recycler = miniSoundboardRecyclerView ?: return
         val adapter = miniSoundboardAdapter ?: return
         val selected = ensureMiniSoundboardSelectedGroup()
         val items = selected?.items.orEmpty()
         val layout = currentMiniSoundboardLayout()
-        ensureMiniSoundboardLayoutManager(recycler, layout)
-        adapter.submit(items, soundboardPlaybackStates, layout)
+        val applyContentUpdate = {
+            ensureMiniSoundboardLayoutManager(recycler, layout)
+            adapter.submit(items, soundboardPlaybackStates, layout)
+        }
+        if (animateContent && recycler.visibility == View.VISIBLE) {
+            recycler.animate().cancel()
+            recycler.animate()
+                .alpha(0f)
+                .setDuration(90L)
+                .withEndAction {
+                    applyContentUpdate()
+                    recycler.animate().cancel()
+                    recycler.animate().alpha(1f).setDuration(130L).start()
+                }
+                .start()
+        } else {
+            recycler.animate().cancel()
+            recycler.alpha = 1f
+            applyContentUpdate()
+        }
         miniSoundboardEmptyTextView?.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
         miniSoundboardLayoutButtonView?.apply {
             text = when (layout) {

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from .config import DistillOptions, DistillTextSource, ProjectPaths, TrainingOptions, VoxCpmDistillOptions
+from .resource_paths import resolve_resources_root
 from .text_normalization import DEFAULT_SENTENCE_PERIOD, normalize_training_texts
 
 
@@ -37,9 +38,196 @@ def _serialize_dataclass(obj: Any) -> dict[str, Any]:
     return result
 
 
+def _work_relative_candidate(project_root: Path, path: Path) -> Optional[Path]:
+    parts = path.parts
+    for index, part in enumerate(parts):
+        if part.lower() == "work" and index + 1 < len(parts):
+            return project_root / "work" / Path(*parts[index + 1 :])
+    return None
+
+
+def resolve_project_file_path(project_root: Path, raw_path: Path, extra_dirs: Iterable[Path] = ()) -> Path:
+    if raw_path.exists():
+        return raw_path
+
+    candidates: list[Path] = []
+    if raw_path.is_absolute():
+        work_candidate = _work_relative_candidate(project_root, raw_path)
+        if work_candidate is not None:
+            candidates.append(work_candidate)
+    else:
+        candidates.extend([project_root / raw_path, project_root / "work" / raw_path])
+
+    candidates.extend(directory / raw_path.name for directory in extra_dirs)
+    candidates.extend(
+        [
+            project_root / "work" / "segments" / raw_path.name,
+            project_root / "work" / "processed" / raw_path.name,
+            project_root / "work" / "input_audio" / raw_path.name,
+            project_root / "work" / "distill_corpus" / "wavs" / raw_path.name,
+            project_root / "work" / "voxcpm_corpus" / "wavs" / raw_path.name,
+        ]
+    )
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.exists():
+            return candidate
+    return raw_path
+
+
+def resolve_project_audio_path(project_root: Path, raw_path: Path) -> Path:
+    return resolve_project_file_path(project_root, raw_path)
+
+
+def _first_existing(paths: Iterable[Path]) -> Optional[Path]:
+    return next((path for path in paths if path.exists()), None)
+
+
+def _resource_root() -> Optional[Path]:
+    root = resolve_resources_root()
+    return root if root and root.exists() else None
+
+
+def _resource_model_root() -> Optional[Path]:
+    root = _resource_root()
+    if root is None:
+        return None
+    model_root = root / "Model"
+    return model_root if model_root.exists() else root
+
+
+def _find_resource_by_name(name: str) -> Optional[Path]:
+    if not name:
+        return None
+    root = _resource_root()
+    if root is None:
+        return None
+    matches = list(root.rglob(name))
+    matches = [path for path in matches if path.is_file()]
+    if not matches:
+        return None
+    matches.sort(key=lambda path: (len(path.parts), str(path).lower()))
+    return matches[0]
+
+
+def _default_asr_model() -> Optional[Path]:
+    model_root = _resource_model_root()
+    if model_root is None:
+        return None
+    candidates = [path for path in model_root.rglob("*.zip") if path.is_file()]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda path: (0 if "sosv" in path.name.lower() else 1, path.name.lower()))
+    return candidates[0]
+
+
+def _default_piper_config() -> Optional[Path]:
+    model_root = _resource_model_root()
+    if model_root is None:
+        return None
+    roots = [model_root / "piper_checkpoints", model_root]
+    candidates: list[Path] = []
+    for root in roots:
+        if root.exists():
+            candidates.extend(path for path in root.rglob("config.json") if path.is_file())
+    if not candidates:
+        return None
+    candidates.sort(key=lambda path: (0 if "zh" in str(path).lower() else 1, str(path).lower()))
+    return candidates[0]
+
+
+def _default_piper_checkpoint(piper_config: Optional[Path] = None) -> Optional[Path]:
+    roots: list[Path] = []
+    if piper_config and piper_config.exists():
+        roots.append(piper_config.parent)
+    model_root = _resource_model_root()
+    resource_root = _resource_root()
+    if model_root is not None:
+        roots.append(model_root / "piper_checkpoints")
+    if resource_root is not None:
+        roots.extend([resource_root / "CKPT", resource_root.parent / "CKPT"])
+    candidates: list[Path] = []
+    for root in roots:
+        if root.exists():
+            for pattern in ("*.ckpt", "*.pt", "*.pth"):
+                candidates.extend(path for path in root.rglob(pattern) if path.is_file())
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: path.stat().st_mtime)
+
+
+def _default_phonemizer_dict() -> Optional[Path]:
+    root = _resource_root()
+    if root is None:
+        return None
+    candidate = root / "data" / "phonemizer_zh.dict"
+    return candidate if candidate.exists() else None
+
+
+def _resolve_with_resource_fallback(project_root: Path, value: Optional[Path], default: Optional[Path] = None) -> Optional[Path]:
+    if value is not None:
+        resolved = resolve_project_file_path(project_root, value)
+        if resolved.exists():
+            return resolved
+        by_name = _find_resource_by_name(value.name)
+        if by_name is not None:
+            return by_name
+    return default
+
+
+def resolve_project_input_audio(project_root: Path, raw_items: Iterable[Any]) -> list[Path]:
+    return [
+        resolve_project_file_path(
+            project_root,
+            Path(str(item)),
+            extra_dirs=[project_root / "work" / "input_audio"],
+        )
+        for item in raw_items
+        if str(item).strip()
+    ]
+
+
+def resolve_project_training_options(project_root: Path, opts: TrainingOptions) -> TrainingOptions:
+    default_config = _default_piper_config()
+    had_base_checkpoint = opts.piper_base_checkpoint is not None
+    opts.asr_model_zip = _resolve_with_resource_fallback(project_root, opts.asr_model_zip, _default_asr_model())
+    if opts.piper_config is not None:
+        resolved_config = resolve_project_file_path(project_root, opts.piper_config)
+        opts.piper_config = resolved_config if resolved_config.exists() else default_config
+    elif opts.use_espeak:
+        opts.piper_config = default_config
+    opts.piper_base_checkpoint = _resolve_with_resource_fallback(
+        project_root,
+        opts.piper_base_checkpoint,
+        _default_piper_checkpoint(opts.piper_config) if had_base_checkpoint or opts.use_espeak else None,
+    )
+    opts.phonemizer_dict = _resolve_with_resource_fallback(project_root, opts.phonemizer_dict, _default_phonemizer_dict())
+    if opts.voicepack_avatar:
+        resolved_avatar = resolve_project_file_path(project_root, opts.voicepack_avatar, extra_dirs=[project_root / "work" / "assets"])
+        opts.voicepack_avatar = resolved_avatar if resolved_avatar.exists() else None
+    elif project_root.exists():
+        opts.voicepack_avatar = _first_existing((project_root / "work" / "assets").glob("voicepack_avatar.*"))
+    return opts
+
+
+def resolve_project_voxcpm_options(project_root: Path, opts: VoxCpmDistillOptions) -> VoxCpmDistillOptions:
+    if opts.reference_audio:
+        resolved_reference = resolve_project_file_path(project_root, opts.reference_audio, extra_dirs=[project_root / "work" / "references"])
+        opts.reference_audio = resolved_reference if resolved_reference.exists() else opts.reference_audio
+    else:
+        opts.reference_audio = _first_existing((project_root / "work" / "references").glob("voxcpm_reference.*"))
+    return opts
+
+
 def read_metadata_entries(metadata_csv: Path) -> list[tuple[Path, str]]:
     if not metadata_csv.exists():
         raise RuntimeError("这个项目缺少训练文本记录，无法继续训练。")
+    project_root = metadata_csv.parent.parent if metadata_csv.parent.name.lower() == "work" else metadata_csv.parent
     entries: list[tuple[Path, str]] = []
     with metadata_csv.open("r", encoding="utf-8") as handle:
         for raw in handle:
@@ -53,6 +241,7 @@ def read_metadata_entries(metadata_csv: Path) -> list[tuple[Path, str]]:
             audio_path = Path(audio_raw)
             if not audio_path.is_absolute():
                 audio_path = metadata_csv.parent / audio_path
+            audio_path = resolve_project_audio_path(project_root, audio_path)
             entries.append((audio_path, text))
     if not entries:
         raise RuntimeError("这个项目没有可用的训练文本，无法继续训练。")

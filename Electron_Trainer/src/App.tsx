@@ -3544,6 +3544,9 @@ function App() {
     if (!isVoxcpmModelReady(modelStatus, voxcpmOpts.denoise)) {
       targets.push('voxcpm_models')
     }
+    if (voxcpmOpts.voice_mode === 'high_fidelity' && !voxcpmOpts.prompt_text.trim() && asrModel) {
+      targets.push(...(await collectPiperTrainingDependencyTargets()))
+    }
     return dedupeDependencyTargets(targets)
   }
 
