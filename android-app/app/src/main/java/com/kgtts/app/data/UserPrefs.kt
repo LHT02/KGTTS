@@ -163,6 +163,8 @@ object UserPrefs {
         booleanPreferencesKey("quick_subtitle_keep_input_preview")
     private val KEY_BLUETOOTH_MEDIA_TITLE_SUBTITLE =
         booleanPreferencesKey("bluetooth_media_title_subtitle")
+    private val KEY_LIVE_SUBTITLE_NOTIFICATION_ENABLED =
+        booleanPreferencesKey("live_subtitle_notification_enabled")
     private val KEY_DRAWING_KEEP_CANVAS_ORIENTATION_TO_DEVICE =
         booleanPreferencesKey("drawing_keep_canvas_orientation_to_device")
     private val KEY_SPEAKER_VERIFY_ENABLED = booleanPreferencesKey("speaker_verify_enabled")
@@ -248,6 +250,7 @@ object UserPrefs {
         val quickSubtitleListPopupGridMode: Boolean = true,
         val quickSubtitleKeepInputPreview: Boolean = true,
         val bluetoothMediaTitleSubtitle: Boolean = false,
+        val liveSubtitleNotificationEnabled: Boolean = false,
         val drawingKeepCanvasOrientationToDevice: Boolean = true,
         val speakerVerifyEnabled: Boolean = false,
         val speakerVerifyThreshold: Float = 0.5f,
@@ -462,6 +465,7 @@ object UserPrefs {
             quickSubtitleListPopupGridMode = this[KEY_QUICK_SUBTITLE_LIST_POPUP_GRID_MODE] ?: true,
             quickSubtitleKeepInputPreview = this[KEY_QUICK_SUBTITLE_KEEP_INPUT_PREVIEW] ?: true,
             bluetoothMediaTitleSubtitle = this[KEY_BLUETOOTH_MEDIA_TITLE_SUBTITLE] ?: false,
+            liveSubtitleNotificationEnabled = this[KEY_LIVE_SUBTITLE_NOTIFICATION_ENABLED] ?: false,
             drawingKeepCanvasOrientationToDevice = this[KEY_DRAWING_KEEP_CANVAS_ORIENTATION_TO_DEVICE] ?: true,
             speakerVerifyEnabled = this[KEY_SPEAKER_VERIFY_ENABLED] ?: false,
             speakerVerifyThreshold = (this[KEY_SPEAKER_VERIFY_THRESHOLD] ?: 0.5f).coerceIn(0.05f, 0.95f),
@@ -912,6 +916,12 @@ object UserPrefs {
     suspend fun setBluetoothMediaTitleSubtitle(context: Context, enabled: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[KEY_BLUETOOTH_MEDIA_TITLE_SUBTITLE] = enabled
+        }
+    }
+
+    suspend fun setLiveSubtitleNotificationEnabled(context: Context, enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_LIVE_SUBTITLE_NOTIFICATION_ENABLED] = enabled
         }
     }
 

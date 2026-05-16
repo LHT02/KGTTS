@@ -277,6 +277,7 @@ import com.lhtstudio.kigtts.app.util.BluetoothMediaTitleBridge
 import com.lhtstudio.kigtts.app.util.ExternalShortcutCatalog
 import com.lhtstudio.kigtts.app.util.ExternalShortcutChoice
 import com.lhtstudio.kigtts.app.util.LauncherMenuShortcuts
+import com.lhtstudio.kigtts.app.util.LiveSubtitleNotificationBridge
 import com.lhtstudio.kigtts.app.util.QqScannerSupport
 import com.lhtstudio.kigtts.app.util.QuickCardRenderCache
 import com.lhtstudio.kigtts.app.util.VolumeHotkeyActionSpec
@@ -669,6 +670,7 @@ data class UiState(
     val quickSubtitleCompactControls: Boolean = false,
     val quickSubtitleKeepInputPreview: Boolean = true,
     val bluetoothMediaTitleSubtitle: Boolean = false,
+    val liveSubtitleNotificationEnabled: Boolean = false,
     val drawingKeepCanvasOrientationToDevice: Boolean = true,
     val pushToTalkPressed: Boolean = false,
     val pushToTalkStreamingText: String = "",
@@ -1443,6 +1445,7 @@ class MainViewModel(
             quickSubtitleCompactControls = settings.quickSubtitleCompactControls,
             quickSubtitleKeepInputPreview = settings.quickSubtitleKeepInputPreview,
             bluetoothMediaTitleSubtitle = settings.bluetoothMediaTitleSubtitle,
+            liveSubtitleNotificationEnabled = settings.liveSubtitleNotificationEnabled,
             drawingKeepCanvasOrientationToDevice = settings.drawingKeepCanvasOrientationToDevice,
             speakerVerifyEnabled = speakerVerifyEnabled,
             speakerVerifyThreshold = settings.speakerVerifyThreshold,
@@ -1590,6 +1593,12 @@ class MainViewModel(
     private fun syncBluetoothMediaTitleToCommittedQuickSubtitle(
         text: String = quickSubtitleCurrentText
     ) {
+        LiveSubtitleNotificationBridge.update(
+            appContext,
+            uiState.liveSubtitleNotificationEnabled,
+            text,
+            uiState.status
+        )
         if (uiState.bluetoothMediaTitleSubtitle) {
             BluetoothMediaTitleBridge.updateSubtitle(appContext, text)
         }
@@ -4079,6 +4088,19 @@ class MainViewModel(
         }
         viewModelScope.launch {
             UserPrefs.setBluetoothMediaTitleSubtitle(appContext, enabled)
+        }
+    }
+
+    fun setLiveSubtitleNotificationEnabled(enabled: Boolean) {
+        uiState = uiState.copy(liveSubtitleNotificationEnabled = enabled)
+        LiveSubtitleNotificationBridge.update(
+            appContext,
+            enabled,
+            quickSubtitleCurrentText,
+            uiState.status
+        )
+        viewModelScope.launch {
+            UserPrefs.setLiveSubtitleNotificationEnabled(appContext, enabled)
         }
     }
 
@@ -10531,6 +10553,18 @@ fun AppScaffold(viewModel: MainViewModel) {
     val hiddenDrawerScrimColor = MaterialTheme.colorScheme.onSurface.copy(
         alpha = if (isDarkTheme) 0.56f else 0.32f
     )
+    LaunchedEffect(
+        state.liveSubtitleNotificationEnabled,
+        state.status,
+        viewModel.quickSubtitleCurrentText
+    ) {
+        LiveSubtitleNotificationBridge.update(
+            context,
+            state.liveSubtitleNotificationEnabled,
+            viewModel.quickSubtitleCurrentText,
+            state.status
+        )
+    }
     val desktopCaptionTopInset = with(density) {
         WindowInsets.captionBar.getTop(this).toDp()
     }
@@ -21796,6 +21830,14 @@ fun SettingsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val scroll = rememberScrollState()
+    val liveSubtitleNotificationPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) {
+                viewModel.setLiveSubtitleNotificationEnabled(true)
+            } else {
+                toast(context, "未授予通知权限，实时通知无法显示")
+            }
+        }
     val drawerModeOptions = listOf(
         UserPrefs.DRAWER_MODE_HIDDEN to "隐藏式抽屉",
         UserPrefs.DRAWER_MODE_PERMANENT to "常驻可折叠"
@@ -22888,7 +22930,7 @@ fun SettingsScreen(
     fun SystemSettingsContent() {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Md2StaggeredFloatIn(index = 0) {
-                Md2SettingsCard(title = "系统与布局") {
+                Md2SettingsCard(title = "显示与主题") {
                     Md2SettingDropdownRow(
                         title = "主题模式",
                         value = themeModeOptions.firstOrNull { it.first == state.themeMode }?.second
@@ -22942,6 +22984,16 @@ fun SettingsScreen(
                         }
                     }
                     Md2SettingSwitchRow(
+                        title = "使用纯色顶栏",
+                        checked = state.solidTopBar,
+                        onCheckedChange = { viewModel.setSolidTopBar(it) },
+                        supportingText = "开启后顶栏与状态栏颜色改为卡片同款自适应配色。"
+                    )
+                }
+            }
+            Md2StaggeredFloatIn(index = 1) {
+                Md2SettingsCard(title = "布局与交互") {
+                    Md2SettingSwitchRow(
                         title = "按键震动反馈",
                         checked = state.hapticFeedbackEnabled,
                         onCheckedChange = { viewModel.setHapticFeedbackEnabled(it) },
@@ -22970,6 +23022,10 @@ fun SettingsScreen(
                         onCheckedChange = { viewModel.setForceFullWidthTabsOnPhone(it) },
                         supportingText = "默认仅平板横屏显示图标和名称；开启后手机横屏的便捷字幕列表和音效板分组 Tab 也使用固定宽度的图标加名称样式。"
                     )
+                }
+            }
+            Md2StaggeredFloatIn(index = 2) {
+                Md2SettingsCard(title = "外部网页") {
                     Md2SettingSwitchRow(
                         title = "启用内置 WebView",
                         checked = state.internalWebViewEnabled,
@@ -22982,12 +23038,10 @@ fun SettingsScreen(
                         },
                         supportingText = "关闭时，二维码扫描得到的第三方网页链接会优先使用 Chrome Custom Tabs；不可用时显示外部链接提示页。"
                     )
-                    Md2SettingSwitchRow(
-                        title = "使用纯色顶栏",
-                        checked = state.solidTopBar,
-                        onCheckedChange = { viewModel.setSolidTopBar(it) },
-                        supportingText = "开启后顶栏与状态栏颜色改为卡片同款自适应配色。"
-                    )
+                }
+            }
+            Md2StaggeredFloatIn(index = 3) {
+                Md2SettingsCard(title = "便捷字幕显示") {
                     Md2SettingSwitchRow(
                         title = "便捷字幕字体大小自适应",
                         checked = state.quickSubtitleAutoFit,
@@ -23012,12 +23066,40 @@ fun SettingsScreen(
                         onCheckedChange = { viewModel.setQuickSubtitleKeepInputPreview(it) },
                         supportingText = "开启后输入框有内容时，键盘收起后大字幕仍显示输入预览；直到下一次语音或快捷文本提交前保持。"
                     )
+                }
+            }
+            Md2StaggeredFloatIn(index = 4) {
+                Md2SettingsCard(title = "通知与外部显示") {
                     Md2SettingSwitchRow(
                         title = "蓝牙媒体标题字幕",
                         checked = state.bluetoothMediaTitleSubtitle,
                         onCheckedChange = { viewModel.setBluetoothMediaTitleSubtitle(it) },
                         supportingText = "实验性兼容模式。开启后会把当前字幕写入系统媒体标题，部分蓝牙歌词屏、车机或小屏会把它显示为歌名；可能覆盖其它媒体标题。"
                     )
+                    Md2SettingSwitchRow(
+                        title = "实时通知",
+                        checked = state.liveSubtitleNotificationEnabled,
+                        onCheckedChange = { enabled ->
+                            if (enabled &&
+                                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.POST_NOTIFICATIONS
+                                ) != PackageManager.PERMISSION_GRANTED
+                            ) {
+                                liveSubtitleNotificationPermissionLauncher.launch(
+                                    Manifest.permission.POST_NOTIFICATIONS
+                                )
+                            } else {
+                                viewModel.setLiveSubtitleNotificationEnabled(enabled)
+                            }
+                        },
+                        supportingText = "开启后通知会显示当前上屏的大字幕，短状态同步顶部状态面板，并提供播放文本、打开便捷字幕和关闭实时通知操作；支持 Android 16+ Live Updates 请求。"
+                    )
+                }
+            }
+            Md2StaggeredFloatIn(index = 5) {
+                Md2SettingsCard(title = "文件与保存") {
                     Text("画板保存路径（相册）", fontWeight = FontWeight.Bold)
                     Text(state.drawingSaveRelativePath, style = MaterialTheme.typography.bodySmall)
                     Md2SettingSwitchRow(
@@ -23041,12 +23123,20 @@ fun SettingsScreen(
                         }
                     }
                     Text("通过系统文件管理器选择目录（建议内部存储）", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Md2StaggeredFloatIn(index = 6) {
+                Md2SettingsCard(title = "名片编辑") {
                     Md2SettingSwitchRow(
                         title = "退出名片编辑时自动保存",
                         checked = state.quickCardAutoSaveOnExit,
                         onCheckedChange = { viewModel.setQuickCardAutoSaveOnExit(it) },
                         supportingText = "关闭时将弹窗询问“是否保存名片”"
                     )
+                }
+            }
+            Md2StaggeredFloatIn(index = 7) {
+                Md2SettingsCard(title = "文件选择") {
                     Md2SettingSwitchRow(
                         title = "使用内建文件管理器",
                         checked = state.useBuiltinFileManager,
@@ -23061,7 +23151,7 @@ fun SettingsScreen(
                     )
                 }
             }
-            Md2StaggeredFloatIn(index = 1) {
+            Md2StaggeredFloatIn(index = 8) {
                 Md2SettingsCard(title = "启动器快捷方式补全") {
                     Md2SettingSwitchRow(
                         title = "使用内嵌列表补全第三方快捷方式",
