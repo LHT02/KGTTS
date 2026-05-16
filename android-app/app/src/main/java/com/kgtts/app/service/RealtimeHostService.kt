@@ -21,6 +21,7 @@ import com.lhtstudio.kigtts.app.ui.ExternalQuickSubtitleRequest
 import com.lhtstudio.kigtts.app.ui.RecognizedItem
 import com.lhtstudio.kigtts.app.util.AppLogger
 import com.lhtstudio.kigtts.app.util.BluetoothMediaTitleBridge
+import com.lhtstudio.kigtts.app.util.LiveSubtitleNotificationBridge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -75,6 +76,7 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
     private var lastPttHistoryAtMs = 0L
     private var manualRecognizedIdSeed = -1L
     private var quickSubtitlePlayOnSend = true
+    private var committedQuickSubtitleText = ""
     private var lastQuickSubtitleRequestId = 0L
     private var lastQuickSubtitleConfigRevision = 0L
     @Volatile private var quickSubtitlePersistRevision = 0L
@@ -102,6 +104,35 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            LiveSubtitleNotificationBridge.ACTION_PLAY_TEXT -> {
+                val text = intent.getStringExtra(LiveSubtitleNotificationBridge.EXTRA_TEXT)
+                    ?.trim()
+                    .orEmpty()
+                    .ifBlank { committedQuickSubtitleText }
+                if (text.isNotBlank()) {
+                    serviceScope.launch {
+                        val queued = speakText(text)
+                        updateStatus(
+                            if (queued != null) {
+                                "已加入朗读队列"
+                            } else if (currentSettings.ttsDisabled) {
+                                "TTS 已禁用"
+                            } else {
+                                "播放文本失败，请检查语音包"
+                            }
+                        )
+                    }
+                }
+            }
+            LiveSubtitleNotificationBridge.ACTION_DISABLE -> {
+                currentSettings = currentSettings.copy(liveSubtitleNotificationEnabled = false)
+                LiveSubtitleNotificationBridge.cancel(applicationContext)
+                serviceScope.launch(Dispatchers.IO) {
+                    UserPrefs.setLiveSubtitleNotificationEnabled(applicationContext, false)
+                }
+            }
+        }
         return START_STICKY
     }
 
@@ -134,6 +165,12 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
     fun publishQuickSubtitleConfig(json: String) {
         val normalized = json.trim()
         if (normalized.isEmpty()) return
+        runCatching {
+            JSONObject(normalized).optString("currentText", "").trim()
+        }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { text ->
+            committedQuickSubtitleText = text
+            syncLiveSubtitleNotification()
+        }
         val revision = nextQuickSubtitleConfigRevision()
         updateState {
             it.copy(
@@ -574,10 +611,11 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
         serviceScope.launch {
             val settings = UserPrefs.getSettings(applicationContext)
             currentSettings = settings
+            committedQuickSubtitleText = loadCommittedQuickSubtitleText()
             BluetoothMediaTitleBridge.setEnabled(
                 applicationContext,
                 settings.bluetoothMediaTitleSubtitle,
-                loadCommittedQuickSubtitleText()
+                committedQuickSubtitleText
             )
             syncBluetoothMediaTitleToCommittedQuickSubtitleConfig()
             val resetBackend = ensureSpeakerBackend(settings)
@@ -599,6 +637,7 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
                     }.joinToString(" / ")
                 )
             }
+            syncLiveSubtitleNotification()
             if (asrDir != null) {
                 withContext(Dispatchers.IO) {
                     ensureController().loadAsr(asrDir)
@@ -640,17 +679,31 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
     }
 
     private suspend fun syncBluetoothMediaTitleToCommittedQuickSubtitleConfig() {
+        committedQuickSubtitleText = loadCommittedQuickSubtitleText()
+        syncLiveSubtitleNotification()
         if (!currentSettings.bluetoothMediaTitleSubtitle) return
-        val text = loadCommittedQuickSubtitleText()
-        if (text.isNotEmpty()) {
-            BluetoothMediaTitleBridge.updateSubtitle(applicationContext, text)
+        if (committedQuickSubtitleText.isNotEmpty()) {
+            BluetoothMediaTitleBridge.updateSubtitle(applicationContext, committedQuickSubtitleText)
         }
     }
 
     private fun syncBluetoothMediaTitleToCommittedQuickSubtitle(text: String) {
         val normalized = text.trim()
-        if (normalized.isEmpty() || !currentSettings.bluetoothMediaTitleSubtitle) return
-        BluetoothMediaTitleBridge.updateSubtitle(applicationContext, normalized)
+        if (normalized.isEmpty()) return
+        committedQuickSubtitleText = normalized
+        syncLiveSubtitleNotification()
+        if (currentSettings.bluetoothMediaTitleSubtitle) {
+            BluetoothMediaTitleBridge.updateSubtitle(applicationContext, normalized)
+        }
+    }
+
+    private fun syncLiveSubtitleNotification() {
+        LiveSubtitleNotificationBridge.update(
+            applicationContext,
+            currentSettings.liveSubtitleNotificationEnabled,
+            committedQuickSubtitleText,
+            currentState().status
+        )
     }
 
     private fun observeSettings() {
@@ -668,6 +721,8 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
                 )
                 if (next.bluetoothMediaTitleSubtitle) {
                     syncBluetoothMediaTitleToCommittedQuickSubtitleConfig()
+                } else {
+                    syncLiveSubtitleNotification()
                 }
                 val resetBackend = ensureSpeakerBackend(next)
                 speakerProfiles = if (resetBackend) {
@@ -1083,6 +1138,7 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
     }
 
     private fun updateState(transform: (RealtimeHostState) -> RealtimeHostState) {
+        val previous = _state.value
         _state.update(transform)
         val snapshot = _state.value
         RealtimeRuntimeBridge.updateAppSnapshot(
@@ -1097,6 +1153,9 @@ class RealtimeHostService : Service(), RealtimeRuntimeBridge.AppDelegate {
                 pushToTalkStreamingText = snapshot.pushToTalkStreamingText
             )
         )
+        if (snapshot.status != previous.status) {
+            syncLiveSubtitleNotification()
+        }
     }
 
     private fun currentState(): RealtimeHostState = _state.value
