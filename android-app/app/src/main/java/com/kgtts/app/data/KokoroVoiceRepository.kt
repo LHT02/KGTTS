@@ -358,7 +358,7 @@ class KokoroVoiceRepository(private val context: Context) {
         tar.use { tis ->
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
             var copied = 0L
-            var entry = tis.nextTarEntry
+            var entry = tis.nextEntry
             while (entry != null) {
                 val outFile = entryOutputFile(outDir, entry.name)
                 if (entry.isDirectory) {
@@ -375,7 +375,7 @@ class KokoroVoiceRepository(private val context: Context) {
                         }
                     }
                 }
-                entry = tis.nextTarEntry
+                entry = tis.nextEntry
             }
         }
     }

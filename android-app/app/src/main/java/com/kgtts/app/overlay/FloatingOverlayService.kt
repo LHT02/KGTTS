@@ -102,6 +102,7 @@ import com.lhtstudio.kigtts.app.util.AppLogger
 import com.lhtstudio.kigtts.app.util.BluetoothMediaTitleBridge
 import com.lhtstudio.kigtts.app.util.QqScannerSupport
 import com.lhtstudio.kigtts.app.util.QuickCardRenderCache
+import com.lhtstudio.kigtts.app.util.snapPlaybackGainPercent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -10697,11 +10698,6 @@ class FloatingOverlayService : Service() {
 
     private fun preferredOutputTypeLabel(type: Int): String =
         preferredOutputTypeOptions().firstOrNull { it.first == type }?.second ?: "自动"
-
-    private fun snapPlaybackGainPercent(value: Int): Int {
-        val clamped = value.coerceIn(0, 1000)
-        return if (abs(clamped - 100) <= 20) 100 else clamped
-    }
 
     private fun overlayLayoutTransition(): LayoutTransition =
         LayoutTransition().apply {
