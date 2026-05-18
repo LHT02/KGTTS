@@ -134,8 +134,6 @@ object SoundboardPresetIo {
             put("type", SOUNDBOARD_TYPE)
             put("version", 1)
             put("selectedGroupId", groups.first().id)
-            put("portraitLayout", config.portraitLayout.wireValue)
-            put("landscapeLayout", config.landscapeLayout.wireValue)
             put(
                 "groups",
                 JSONArray().apply {

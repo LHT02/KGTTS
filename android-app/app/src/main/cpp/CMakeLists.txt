@@ -5,6 +5,12 @@ project(kgtts_espeak LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(KIGTTS_16KB_PAGE_LINKER_FLAGS "-Wl,-z,max-page-size=16384")
+
+function(kigtts_enable_16kb_pages target_name)
+    target_link_options(${target_name} PRIVATE "${KIGTTS_16KB_PAGE_LINKER_FLAGS}")
+endfunction()
+
 include(ExternalProject)
 
 set(PIPER_PHONEMIZE_DIR "${CMAKE_CURRENT_LIST_DIR}/piper-phonemize")
@@ -45,6 +51,7 @@ ExternalProject_Add(
         -DEXTRA_cmn=ON
         -DEXTRA_ru=ON
         -DCMAKE_C_FLAGS=-D_FILE_OFFSET_BITS=64
+        -DCMAKE_SHARED_LINKER_FLAGS=${KIGTTS_16KB_PAGE_LINKER_FLAGS}
         -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
         -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
         -DANDROID_ABI=${ANDROID_ABI}
@@ -123,6 +130,8 @@ target_link_libraries(
     log
 )
 
+kigtts_enable_16kb_pages(espeak_jni)
+
 target_compile_options(espeak_jni PRIVATE -fexceptions)
 
 add_library(
@@ -148,6 +157,8 @@ target_link_libraries(
     "${AEC3_LIB}"
     log
 )
+
+kigtts_enable_16kb_pages(aec3_jni)
 
 target_compile_options(aec3_jni PRIVATE -fexceptions)
 
@@ -179,6 +190,8 @@ target_link_libraries(
     log
 )
 
+kigtts_enable_16kb_pages(rnnoise_jni)
+
 target_compile_options(rnnoise_jni PRIVATE -fexceptions)
 
 add_library(
@@ -209,6 +222,8 @@ target_link_libraries(
     speex_jni
     log
 )
+
+kigtts_enable_16kb_pages(speex_jni)
 
 target_compile_options(
     speex_jni PRIVATE

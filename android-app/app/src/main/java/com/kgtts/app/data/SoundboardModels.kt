@@ -9,7 +9,7 @@ enum class SoundboardLayoutMode(
     val label: String
 ) {
     List("list", 1, "列表"),
-    Grid2("grid_2", 2, "两列宫格"),
+    Grid2("grid_2", 2, "宫格"),
     Grid3("grid_3", 3, "三列宫格"),
     Grid4("grid_4", 4, "四列宫格"),
     Grid5("grid_5", 5, "五列宫格"),
@@ -17,12 +17,19 @@ enum class SoundboardLayoutMode(
     Grid7("grid_7", 7, "七列宫格"),
     Grid8("grid_8", 8, "八列宫格");
 
+    val isGrid: Boolean
+        get() = this != List
+
+    fun asAdaptiveMode(): SoundboardLayoutMode = if (isGrid) Grid2 else List
+
     companion object {
         fun fromWire(
             raw: String?,
             fallback: SoundboardLayoutMode = List
         ): SoundboardLayoutMode {
-            return entries.firstOrNull { it.wireValue == raw } ?: fallback
+            val normalized = raw?.trim().orEmpty()
+            if (normalized == "grid") return Grid2
+            return (entries.firstOrNull { it.wireValue == normalized } ?: fallback).asAdaptiveMode()
         }
     }
 }
@@ -68,7 +75,7 @@ fun defaultSoundboardConfig(): SoundboardConfig {
         groups = groups,
         selectedGroupId = groups.first().id,
         portraitLayout = SoundboardLayoutMode.List,
-        landscapeLayout = SoundboardLayoutMode.Grid5
+        landscapeLayout = SoundboardLayoutMode.List
     )
 }
 
@@ -105,17 +112,20 @@ fun parseSoundboardConfig(raw: String?): SoundboardConfig {
         }
         val groups = parsedGroups.ifEmpty { defaultSoundboardGroups() }
         val selectedId = root.optLong("selectedGroupId", groups.first().id)
+        val layout = if (root.has("layout")) {
+            SoundboardLayoutMode.fromWire(root.optString("layout"), fallback = SoundboardLayoutMode.List)
+        } else if (root.has("portraitLayout")) {
+            SoundboardLayoutMode.fromWire(root.optString("portraitLayout"), fallback = SoundboardLayoutMode.List)
+        } else if (root.has("landscapeLayout")) {
+            SoundboardLayoutMode.fromWire(root.optString("landscapeLayout"), fallback = SoundboardLayoutMode.List)
+        } else {
+            SoundboardLayoutMode.List
+        }.asAdaptiveMode()
         SoundboardConfig(
             groups = groups,
             selectedGroupId = groups.firstOrNull { it.id == selectedId }?.id ?: groups.first().id,
-            portraitLayout = SoundboardLayoutMode.fromWire(
-                root.optString("portraitLayout"),
-                fallback = SoundboardLayoutMode.List
-            ),
-            landscapeLayout = SoundboardLayoutMode.fromWire(
-                root.optString("landscapeLayout"),
-                fallback = SoundboardLayoutMode.Grid5
-            )
+            portraitLayout = layout,
+            landscapeLayout = layout
         )
     }.getOrElse { defaultSoundboardConfig() }
 }
@@ -123,8 +133,8 @@ fun parseSoundboardConfig(raw: String?): SoundboardConfig {
 fun serializeSoundboardConfig(config: SoundboardConfig): String {
     return JSONObject().apply {
         put("selectedGroupId", config.selectedGroupId)
-        put("portraitLayout", config.portraitLayout.wireValue)
-        put("landscapeLayout", config.landscapeLayout.wireValue)
+        put("portraitLayout", config.portraitLayout.asAdaptiveMode().wireValue)
+        put("landscapeLayout", config.landscapeLayout.asAdaptiveMode().wireValue)
         put(
             "groups",
             JSONArray().apply {

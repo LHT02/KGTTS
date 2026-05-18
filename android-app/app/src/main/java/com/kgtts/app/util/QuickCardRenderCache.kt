@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.util.LruCache
 import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import java.io.File
 import kotlin.math.max
@@ -44,7 +45,10 @@ object QuickCardRenderCache {
             qrCache.get(cacheKey)?.let { return it }
         }
         val bitmap = runCatching {
-            val matrix = QRCodeWriter().encode(normalized, BarcodeFormat.QR_CODE, sizePx, sizePx)
+            val hints = mapOf(
+                EncodeHintType.CHARACTER_SET to Charsets.UTF_8.name()
+            )
+            val matrix = QRCodeWriter().encode(normalized, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
             Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888).apply {
                 for (x in 0 until sizePx) {
                     for (y in 0 until sizePx) {

@@ -115,6 +115,8 @@ object UserPrefs {
     private val KEY_HAPTIC_FEEDBACK_ENABLED = booleanPreferencesKey("haptic_feedback_enabled")
     private val KEY_FORCE_FULL_WIDTH_TABS_ON_PHONE =
         booleanPreferencesKey("force_full_width_tabs_on_phone")
+    private val KEY_SOUNDBOARD_GRID_FULL_WIDTH =
+        booleanPreferencesKey("soundboard_grid_full_width")
     private val KEY_INTERNAL_WEBVIEW_ENABLED = booleanPreferencesKey("internal_webview_enabled")
     private val KEY_DRAWING_SAVE_RELATIVE_PATH = stringPreferencesKey("drawing_save_relative_path")
     private val KEY_QUICK_CARD_AUTO_SAVE_ON_EXIT = booleanPreferencesKey("quick_card_auto_save_on_exit")
@@ -218,6 +220,7 @@ object UserPrefs {
         val fontScaleBlockMode: Int = FONT_SCALE_BLOCK_ICONS_ONLY,
         val hapticFeedbackEnabled: Boolean = true,
         val forceFullWidthTabsOnPhone: Boolean = false,
+        val soundboardGridFullWidth: Boolean = false,
         val internalWebViewEnabled: Boolean = false,
         val drawingSaveRelativePath: String = DEFAULT_DRAWING_SAVE_RELATIVE_PATH,
         val quickCardAutoSaveOnExit: Boolean = false,
@@ -424,6 +427,7 @@ object UserPrefs {
             ),
             hapticFeedbackEnabled = this[KEY_HAPTIC_FEEDBACK_ENABLED] ?: true,
             forceFullWidthTabsOnPhone = this[KEY_FORCE_FULL_WIDTH_TABS_ON_PHONE] ?: false,
+            soundboardGridFullWidth = this[KEY_SOUNDBOARD_GRID_FULL_WIDTH] ?: false,
             internalWebViewEnabled = this[KEY_INTERNAL_WEBVIEW_ENABLED] ?: false,
             drawingSaveRelativePath = (this[KEY_DRAWING_SAVE_RELATIVE_PATH]
                 ?: DEFAULT_DRAWING_SAVE_RELATIVE_PATH).ifBlank { DEFAULT_DRAWING_SAVE_RELATIVE_PATH },
@@ -729,6 +733,12 @@ object UserPrefs {
     suspend fun setForceFullWidthTabsOnPhone(context: Context, enabled: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[KEY_FORCE_FULL_WIDTH_TABS_ON_PHONE] = enabled
+        }
+    }
+
+    suspend fun setSoundboardGridFullWidth(context: Context, enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_SOUNDBOARD_GRID_FULL_WIDTH] = enabled
         }
     }
 
