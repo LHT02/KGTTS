@@ -1132,6 +1132,10 @@ internal fun SoundboardEditorScreen(
     val tabletTwoPane = tabletLike && configuration.screenWidthDp >= 900
     val editorMaxWidth = if (tabletTwoPane) 1180.dp else UiTokens.WideContentMaxWidth
     val editorLeftColumnWidth = if (configuration.screenWidthDp < 720) 260.dp else 320.dp
+    val editorBottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 8.dp
+    val editorTwoPaneHeight = (
+        configuration.screenHeightDp.dp - UiTokens.PageTopBlank - editorBottomPadding
+    ).coerceAtLeast(420.dp)
     val groups = viewModel.soundboardGroups
     var selectedGroupIndex by remember(groups, viewModel.soundboardSelectedGroupId) {
         mutableIntStateOf(viewModel.currentSoundboardGroupIndex().coerceIn(0, groups.lastIndex.coerceAtLeast(0)))
@@ -1486,15 +1490,19 @@ internal fun SoundboardEditorScreen(
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             state = listState,
-            contentPadding = PaddingValues(top = UiTokens.PageTopBlank, bottom = UiTokens.PageBottomBlank),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = PaddingValues(
+                top = UiTokens.PageTopBlank,
+                bottom = if (tabletTwoPane) editorBottomPadding else pageBottomBlankPadding()
+            ),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            userScrollEnabled = !tabletTwoPane
         ) {
             if (tabletTwoPane) {
                 item(key = "soundboard_editor_two_pane") {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .fillParentMaxHeight(),
+                            .height(editorTwoPaneHeight),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.Top
                     ) {
@@ -1502,7 +1510,8 @@ internal fun SoundboardEditorScreen(
                             modifier = Modifier
                                 .width(editorLeftColumnWidth)
                                 .fillMaxHeight()
-                                .verticalScroll(rememberScrollState()),
+                                .verticalScroll(rememberScrollState())
+                                .padding(4.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             settingsCard()
@@ -1512,6 +1521,7 @@ internal fun SoundboardEditorScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight()
+                                .padding(4.dp)
                         ) {
                             itemsCard(true)
                         }
@@ -1903,16 +1913,19 @@ internal fun SoundboardItemsRecyclerCard(
         }
     }
 
+    val cardColor = md2ElevatedCardContainerColor(UiTokens.CardElevation)
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(UiTokens.Radius),
-        backgroundColor = md2CardContainerColor(),
+        backgroundColor = cardColor,
         elevation = UiTokens.CardElevation
     ) {
         Column(modifier = if (internalListScroll) Modifier.fillMaxSize() else Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .zIndex(1f)
+                    .background(cardColor)
                     .padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1972,7 +1985,8 @@ internal fun SoundboardItemsRecyclerCard(
                 onEnterSelectionMode = onEnterSelectionMode,
                 onToggleSelection = onToggleSelection,
                 parentEdgeScrollBy = parentEdgeScrollBy,
-                nestedScrollingEnabled = internalListScroll
+                nestedScrollingEnabled = false,
+                clipListBounds = false
             )
         }
     }
@@ -1982,28 +1996,17 @@ internal fun SoundboardItemsRecyclerCard(
             onDismissRequest = { showAddDialog = false },
             title = { Text("新增音效条目") },
             text = {
-                OutlinedTextField(
+                Md2DialogOutlinedField(
                     value = addTitle,
                     onValueChange = { addTitle = it },
-                    modifier = Modifier
-                        .padding(top = 8.dp)
-                        .fillMaxWidth()
-                        .onFocusChanged { addTitleFocused = it.isFocused },
-                    label = { Text("条目名") },
+                    label = "条目名",
+                    modifier = Modifier.onFocusChanged { addTitleFocused = it.isFocused },
                     singleLine = true,
-                    shape = Md2ControlShape,
                     trailingIcon = if (addTitleFocused && addTitle.isNotEmpty()) {
                         { Md2ClearFieldButton { addTitle = "" } }
                     } else {
                         null
-                    },
-                    colors = TextFieldDefaults.outlinedTextFieldColors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                        focusedLabelColor = MaterialTheme.colorScheme.primary,
-                        unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        cursorColor = MaterialTheme.colorScheme.primary
-                    )
+                    }
                 )
             },
             confirmButton = {
@@ -2115,31 +2118,30 @@ internal fun SoundboardItemsRecyclerCard(
             onDismissRequest = { editTargetIndex = null },
             title = { Text("编辑音效条目") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
+                Column(
+                    modifier = Modifier.padding(top = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Md2DialogOutlinedField(
                         value = editTitle,
                         onValueChange = { editTitle = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .onFocusChanged { editTitleFocused = it.isFocused },
-                        label = { Text("条目名") },
+                        label = "条目名",
+                        modifier = Modifier.onFocusChanged { editTitleFocused = it.isFocused },
                         singleLine = true,
-                        shape = Md2ControlShape,
+                        topPadding = 0.dp,
                         trailingIcon = if (editTitleFocused && editTitle.isNotEmpty()) {
                             { Md2ClearFieldButton { editTitle = "" } }
                         } else {
                             null
                         }
                     )
-                    OutlinedTextField(
+                    Md2DialogOutlinedField(
                         value = editWakeWord,
                         onValueChange = { editWakeWord = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .onFocusChanged { editWakeWordFocused = it.isFocused },
-                        label = { Text("唤醒词") },
+                        label = "唤醒词",
+                        modifier = Modifier.onFocusChanged { editWakeWordFocused = it.isFocused },
                         singleLine = true,
-                        shape = Md2ControlShape,
+                        topPadding = 0.dp,
                         trailingIcon = if (editWakeWordFocused && editWakeWord.isNotEmpty()) {
                             { Md2ClearFieldButton { editWakeWord = "" } }
                         } else {
@@ -2321,7 +2323,8 @@ internal fun SoundboardItemsRecyclerList(
     onEnterSelectionMode: (Long) -> Unit,
     onToggleSelection: (Long) -> Unit,
     parentEdgeScrollBy: ((Int) -> Boolean)? = null,
-    nestedScrollingEnabled: Boolean = false
+    nestedScrollingEnabled: Boolean = false,
+    clipListBounds: Boolean = false
 ) {
     val parentComposition = rememberCompositionContext()
     val onItemsChangedState = rememberUpdatedState(onItemsChanged)
@@ -2337,8 +2340,8 @@ internal fun SoundboardItemsRecyclerList(
             val recycler = RecyclerView(ctx).apply {
                 layoutManager = LinearLayoutManager(ctx)
                 overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-                clipToPadding = false
-                clipChildren = false
+                clipToPadding = clipListBounds
+                clipChildren = clipListBounds
                 isNestedScrollingEnabled = nestedScrollingEnabled
                 itemAnimator = DefaultItemAnimator().apply {
                     supportsChangeAnimations = false
@@ -2430,6 +2433,8 @@ internal fun SoundboardItemsRecyclerList(
         },
         update = { recycler ->
             recycler.isNestedScrollingEnabled = nestedScrollingEnabled
+            recycler.clipToPadding = clipListBounds
+            recycler.clipChildren = clipListBounds
             val adapter = recycler.adapter as? SoundboardItemRecyclerAdapter ?: return@AndroidView
             adapter.updateSelection(selectionMode, selectedItemIds)
             adapter.submitFromState(items)

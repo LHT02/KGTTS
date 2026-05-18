@@ -349,7 +349,7 @@ fun RealtimeScreen(viewModel: MainViewModel) {
     val recognized = viewModel.realtimeRecognized
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
-    val bottomPadding = UiTokens.PageBottomBlank
+    val bottomPadding = pageBottomBlankPadding()
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -752,7 +752,7 @@ fun FloatingOverlayScreen(
             }
         }
 
-        Spacer(Modifier.height(UiTokens.PageBottomBlank))
+        Spacer(Modifier.height(pageBottomBlankPadding()))
     }
 
     pendingVolumeHotkeyEnableSequence?.let { sequence ->

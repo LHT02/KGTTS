@@ -529,7 +529,7 @@ fun VoicePackScreen(viewModel: MainViewModel, state: UiState) {
                     ) {
                         Spacer(Modifier.height(UiTokens.PageTopBlank))
                         Text("暂无语音包，请点击主标题栏导入按钮。")
-                        Spacer(Modifier.height(UiTokens.PageBottomBlank))
+                        Spacer(Modifier.height(pageBottomBlankPadding()))
                     }
                 }
             } else {
@@ -540,7 +540,7 @@ fun VoicePackScreen(viewModel: MainViewModel, state: UiState) {
                     packs = state.voicePacks,
                     currentVoicePath = state.voiceDir?.absolutePath,
                     topBlankHeight = UiTokens.PageTopBlank,
-                    bottomBlankHeight = UiTokens.PageBottomBlank,
+                    bottomBlankHeight = pageBottomBlankPadding(),
                     onSelect = { viewModel.selectVoice(it.dir) },
                     onTogglePin = { viewModel.toggleVoicePin(it) },
                     onDetail = { pack ->

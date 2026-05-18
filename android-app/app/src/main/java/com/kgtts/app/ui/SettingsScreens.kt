@@ -1865,7 +1865,7 @@ fun SettingsScreen(
                         SettingsCategoryContent(category)
                     }
                 }
-                Spacer(Modifier.height(UiTokens.PageBottomBlank))
+                Spacer(Modifier.height(pageBottomBlankPadding()))
             }
         } else {
             Row(
@@ -1924,7 +1924,7 @@ fun SettingsScreen(
                                 SettingsCategoryContent(category)
                             }
                         }
-                        Spacer(Modifier.height(UiTokens.PageBottomBlank))
+                        Spacer(Modifier.height(pageBottomBlankPadding()))
                     }
                 }
             }
