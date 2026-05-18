@@ -1371,8 +1371,6 @@ fun QuickSubtitleScreen(
         quickSubtitleListDialogVisible = true
     }
     val statusBarInsetTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val navBarsPadding = WindowInsets.navigationBars.asPaddingValues()
-    val navBarsBottomInset = navBarsPadding.calculateBottomPadding()
     val quickSubtitleTopBlankTarget =
         if (fullscreenMode) (statusBarInsetTop + UiTokens.PageTopBlank) else UiTokens.PageTopBlank
     val quickSubtitleTopBlank by animateDpAsState(
@@ -1382,10 +1380,11 @@ fun QuickSubtitleScreen(
     )
     val landscapeQuickPanelWidth = 220.dp
     val landscapeQuickPanelGap = 8.dp
+    val pageBottomBlank = pageBottomBlankPadding()
     val quickSubtitleBottomBlankBase = if (isLandscape) {
-        UiTokens.PageBottomBlank - 12.dp + navBarsBottomInset
+        pageBottomBlank - 12.dp
     } else {
-        UiTokens.PageBottomBlank + 50.dp + navBarsBottomInset
+        pageBottomBlank + 50.dp
     }
     val keyboardRaisedBottomBlank = imeBottomInset + bottomInputBarHeight + 8.dp
     val quickSubtitleBottomBlankTarget = if (
@@ -3357,6 +3356,10 @@ internal fun QuickSubtitleEditorScreen(
     val tabletTwoPane = tabletLike && configuration.screenWidthDp >= 900
     val editorMaxWidth = if (tabletTwoPane) 1180.dp else UiTokens.WideContentMaxWidth
     val editorLeftColumnWidth = if (configuration.screenWidthDp < 720) 260.dp else 320.dp
+    val editorBottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 8.dp
+    val editorTwoPaneHeight = (
+        configuration.screenHeightDp.dp - UiTokens.PageTopBlank - editorBottomPadding
+    ).coerceAtLeast(420.dp)
     val groups = viewModel.quickSubtitleGroups
     val compactControls = viewModel.uiState.quickSubtitleCompactControls
     var selectedGroupIndex by remember(groups, viewModel.quickSubtitleSelectedGroupId) {
@@ -3678,16 +3681,17 @@ internal fun QuickSubtitleEditorScreen(
             state = listState,
             contentPadding = PaddingValues(
                 top = UiTokens.PageTopBlank,
-                bottom = UiTokens.PageBottomBlank
+                bottom = if (tabletTwoPane) editorBottomPadding else pageBottomBlankPadding()
             ),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            userScrollEnabled = !tabletTwoPane
         ) {
             if (tabletTwoPane) {
                 item(key = "quick_subtitle_editor_two_pane") {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .fillParentMaxHeight(),
+                            .height(editorTwoPaneHeight),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.Top
                     ) {
@@ -3695,7 +3699,8 @@ internal fun QuickSubtitleEditorScreen(
                             modifier = Modifier
                                 .width(editorLeftColumnWidth)
                                 .fillMaxHeight()
-                                .verticalScroll(rememberScrollState()),
+                                .verticalScroll(rememberScrollState())
+                                .padding(4.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             settingsCard()
@@ -3705,6 +3710,7 @@ internal fun QuickSubtitleEditorScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight()
+                                .padding(4.dp)
                         ) {
                             itemsCard(true)
                         }
@@ -4027,16 +4033,19 @@ internal fun QuickSubtitleItemsRecyclerCard(
     var addText by remember { mutableStateOf("") }
     var addTextFocused by remember { mutableStateOf(false) }
 
+    val cardColor = md2ElevatedCardContainerColor(UiTokens.CardElevation)
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(UiTokens.Radius),
-        backgroundColor = md2CardContainerColor(),
+        backgroundColor = cardColor,
         elevation = UiTokens.CardElevation
     ) {
         Column(modifier = if (internalListScroll) Modifier.fillMaxSize() else Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .zIndex(1f)
+                    .background(cardColor)
                     .padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -4073,7 +4082,8 @@ internal fun QuickSubtitleItemsRecyclerCard(
                 onEnterSelectionMode = onEnterSelectionMode,
                 onToggleSelection = onToggleSelection,
                 parentEdgeScrollBy = parentEdgeScrollBy,
-                nestedScrollingEnabled = internalListScroll
+                nestedScrollingEnabled = false,
+                clipListBounds = false
             )
         }
     }
@@ -4083,28 +4093,18 @@ internal fun QuickSubtitleItemsRecyclerCard(
             onDismissRequest = { showAddDialog = false },
             title = { Text("新增快捷文本") },
             text = {
-                OutlinedTextField(
+                Md2DialogOutlinedField(
                     value = addText,
                     onValueChange = { addText = it },
-                    modifier = Modifier
-                        .padding(top = 8.dp)
-                        .fillMaxWidth()
-                        .onFocusChanged { addTextFocused = it.isFocused },
-                    label = { Text("快捷文本") },
+                    label = "快捷文本",
+                    modifier = Modifier.onFocusChanged { addTextFocused = it.isFocused },
+                    singleLine = false,
                     maxLines = 4,
-                    shape = Md2ControlShape,
                     trailingIcon = if (addTextFocused && addText.isNotEmpty()) {
                         { Md2ClearFieldButton { addText = "" } }
                     } else {
                         null
-                    },
-                    colors = TextFieldDefaults.outlinedTextFieldColors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                        focusedLabelColor = MaterialTheme.colorScheme.primary,
-                        unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        cursorColor = MaterialTheme.colorScheme.primary
-                    )
+                    }
                 )
             },
             confirmButton = {
@@ -4136,27 +4136,18 @@ internal fun QuickSubtitleItemsRecyclerCard(
             onDismissRequest = { editTargetIndex = null },
             title = { Text("编辑快捷文本") },
             text = {
-                OutlinedTextField(
+                Md2DialogOutlinedField(
                     value = editText,
                     onValueChange = { editText = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .onFocusChanged { editTextFocused = it.isFocused },
-                    label = { Text("快捷文本") },
+                    label = "快捷文本",
+                    modifier = Modifier.onFocusChanged { editTextFocused = it.isFocused },
+                    singleLine = false,
                     maxLines = 4,
-                    shape = Md2ControlShape,
                     trailingIcon = if (editTextFocused && editText.isNotEmpty()) {
                         { Md2ClearFieldButton { editText = "" } }
                     } else {
                         null
-                    },
-                    colors = TextFieldDefaults.outlinedTextFieldColors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                        focusedLabelColor = MaterialTheme.colorScheme.primary,
-                        unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        cursorColor = MaterialTheme.colorScheme.primary
-                    )
+                    }
                 )
             },
             confirmButton = {
@@ -4190,7 +4181,8 @@ internal fun QuickSubtitleItemsRecyclerList(
     onEnterSelectionMode: (Int) -> Unit,
     onToggleSelection: (Int) -> Unit,
     parentEdgeScrollBy: ((Int) -> Boolean)? = null,
-    nestedScrollingEnabled: Boolean = false
+    nestedScrollingEnabled: Boolean = false,
+    clipListBounds: Boolean = false
 ) {
     val parentComposition = rememberCompositionContext()
     val onItemsChangedState = rememberUpdatedState(onItemsChanged)
@@ -4204,8 +4196,8 @@ internal fun QuickSubtitleItemsRecyclerList(
             val recycler = RecyclerView(ctx).apply {
                 layoutManager = LinearLayoutManager(ctx)
                 overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-                clipToPadding = false
-                clipChildren = false
+                clipToPadding = clipListBounds
+                clipChildren = clipListBounds
                 isNestedScrollingEnabled = nestedScrollingEnabled
                 itemAnimator = DefaultItemAnimator().apply {
                     supportsChangeAnimations = false
@@ -4306,6 +4298,8 @@ internal fun QuickSubtitleItemsRecyclerList(
         },
         update = { recycler ->
             recycler.isNestedScrollingEnabled = nestedScrollingEnabled
+            recycler.clipToPadding = clipListBounds
+            recycler.clipChildren = clipListBounds
             val adapter = recycler.adapter as? QuickSubtitleItemRecyclerAdapter ?: return@AndroidView
             adapter.updateSelection(selectionMode, selectedIndexes)
             adapter.submitFromState(items)

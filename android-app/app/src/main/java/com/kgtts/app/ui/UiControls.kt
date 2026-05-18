@@ -1090,6 +1090,42 @@ internal fun Md2OutlinedField(
 }
 
 @Composable
+internal fun Md2DialogOutlinedField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    singleLine: Boolean = true,
+    maxLines: Int = 1,
+    topPadding: Dp = 16.dp,
+    trailingIcon: (@Composable () -> Unit)? = null
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = topPadding)
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = modifier.fillMaxWidth(),
+            label = { Text(label) },
+            singleLine = singleLine,
+            maxLines = maxLines,
+            shape = Md2ControlShape,
+            trailingIcon = trailingIcon,
+            colors = TextFieldDefaults.outlinedTextFieldColors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                focusedLabelColor = MaterialTheme.colorScheme.primary,
+                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                cursorColor = MaterialTheme.colorScheme.primary
+            )
+        )
+    }
+}
+
+@Composable
 internal fun Md2ClearFieldButton(
     contentDescription: String = "清除",
     onClick: () -> Unit

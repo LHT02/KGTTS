@@ -669,6 +669,11 @@ internal fun md2ElevatedCardContainerColor(elevation: Dp = UiTokens.CardElevatio
     return LocalElevationOverlay.current?.apply(base, elevation) ?: base
 }
 
+@Composable
+internal fun pageBottomBlankPadding(extraContentGap: Dp = 44.dp): Dp {
+    return WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + extraContentGap
+}
+
 internal val MaterialSymbolsSharp = FontFamily(
     Font(
         resId = R.font.material_symbols_sharp,
