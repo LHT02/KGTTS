@@ -1380,11 +1380,11 @@ fun QuickSubtitleScreen(
     )
     val landscapeQuickPanelWidth = 220.dp
     val landscapeQuickPanelGap = 8.dp
-    val pageBottomBlank = pageBottomBlankPadding()
+    val navBarsBottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val quickSubtitleBottomBlankBase = if (isLandscape) {
-        pageBottomBlank - 12.dp
+        UiTokens.PageBottomBlank - 12.dp + navBarsBottomInset
     } else {
-        pageBottomBlank + 50.dp
+        UiTokens.PageBottomBlank + 50.dp + navBarsBottomInset
     }
     val keyboardRaisedBottomBlank = imeBottomInset + bottomInputBarHeight + 8.dp
     val quickSubtitleBottomBlankTarget = if (
