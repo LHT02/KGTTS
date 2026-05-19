@@ -65,6 +65,24 @@ import avatarLht from '../../ARTS/Avatar/LHT.jpg'
 import avatarYuiLu from '../../ARTS/Avatar/YuiLu.jpg'
 import openSourceLicensesText from './legal/open_source_licenses.md?raw'
 import privacyPolicyText from './legal/privacy_policy.md?raw'
+import {
+  SOUNDBOARD_AUDIO_EXTENSIONS,
+  SOUNDBOARD_EDITOR_STORAGE_KEY,
+  SOUNDBOARD_GROUP_ICONS,
+  createSoundboardId,
+  defaultSoundboardEditorConfig,
+  formatDurationMsForSoundboard,
+  isSoundboardAudioPath,
+  normalizeSoundboardEditorConfig,
+  readSavedSoundboardEditorConfig,
+  soundboardFileTitle,
+  type SoundboardBatchEditState,
+  type SoundboardEditorConfig,
+  type SoundboardEditorGroup,
+  type SoundboardEditorItem,
+  type SoundboardItemDragState,
+  type SoundboardPreviewPlaybackState,
+} from './features/soundboardEditor'
 
 type ProgressStage = Exclude<PipelineStage, 'idle' | 'preview' | 'runtime'>
 type ProgressMap = Record<ProgressStage, number>
@@ -202,61 +220,6 @@ type DistillTextPresetOption = {
   recommended?: boolean
 }
 
-type SoundboardLayoutValue = 'list' | 'grid_2' | 'grid_3' | 'grid_4' | 'grid_5' | 'grid_6' | 'grid_7' | 'grid_8'
-
-type SoundboardEditorItem = {
-  id: number
-  title: string
-  wakeWord: string
-  audioPath: string
-  durationMs: number
-  trimStartMs: number
-  trimEndMs: number
-}
-
-type SoundboardEditorGroup = {
-  id: number
-  title: string
-  icon: string
-  keywordWakeEnabled: boolean
-  items: SoundboardEditorItem[]
-}
-
-type SoundboardEditorConfig = {
-  selectedGroupId: number
-  portraitLayout: SoundboardLayoutValue
-  landscapeLayout: SoundboardLayoutValue
-  groups: SoundboardEditorGroup[]
-}
-
-type SoundboardBatchEditState = {
-  titlePrefix: string
-  titleSuffix: string
-  wakeWord: string
-  replaceWakeWord: boolean
-  targetGroupId: string
-}
-
-type SoundboardItemDragState = {
-  itemId: number
-  pointerId: number
-  originIndex: number
-  targetIndex: number
-  startY: number
-  pointerOffsetY: number
-  rowHeight: number
-  rowGap: number
-  rowCenters: number[]
-  startScrollTop: number
-}
-
-type SoundboardPreviewPlaybackState = {
-  playing: boolean
-  currentTime: number
-  duration: number
-  requestId: number
-}
-
 type GsviAttributionFields = {
   gsvAuthor: string
   gsvTrainer: string
@@ -278,7 +241,6 @@ const DRAWER_EXPANDED_STORAGE_KEY = 'kgtts_drawer_expanded'
 const DISTILL_SETTINGS_STORAGE_KEY = 'kigtts_gsv_distill_settings'
 const VOXCPM_SETTINGS_STORAGE_KEY = 'kigtts_voxcpm_distill_settings'
 const DISTILL_MODE_STORAGE_KEY = 'kigtts_training_mode'
-const SOUNDBOARD_EDITOR_STORAGE_KEY = 'kigtts_soundboard_editor_config'
 const GSVI_CONFIRM_SKIP_STORAGE_KEY = 'kigtts_gsvi_confirm_skip'
 const GSVI_MODE_INTRO_SKIP_STORAGE_KEY = 'kigtts_gsvi_mode_intro_skip'
 const GSVI_GUIDE_URL = 'https://www.yuque.com/baicaigongchang1145haoyuangong/ib3g1e/gos50nrqrlipryqq'
@@ -398,31 +360,6 @@ const GSVI_REQUIRED_NAMES = {
   gsviPacker: 'AI-Hobbyist',
 } as const
 const DISTILL_TEXT_SOURCE_EMPTY_HINT = '点击右上角 + 添加内置预设文本，或导入 / 拖入自定义 .txt、.csv、.jsonl 文本文件。'
-const SOUNDBOARD_AUDIO_EXTENSIONS = ['wav', 'mp3', 'm4a', 'aac', 'flac', 'ogg', 'opus']
-const SOUNDBOARD_GROUP_ICONS = [
-  'music_note',
-  'campaign',
-  'mood',
-  'celebration',
-  'pets',
-  'favorite',
-  'stars',
-  'sports_esports',
-  'notifications',
-  'record_voice_over',
-  'theater_comedy',
-  'bolt',
-]
-const SOUNDBOARD_LAYOUT_OPTIONS: Array<{ value: SoundboardLayoutValue; label: string }> = [
-  { value: 'list', label: '列表' },
-  { value: 'grid_2', label: '两列宫格' },
-  { value: 'grid_3', label: '三列宫格' },
-  { value: 'grid_4', label: '四列宫格' },
-  { value: 'grid_5', label: '五列宫格' },
-  { value: 'grid_6', label: '六列宫格' },
-  { value: 'grid_7', label: '七列宫格' },
-  { value: 'grid_8', label: '八列宫格' },
-]
 const NAV_ITEMS: Array<{ key: AppPage; label: string; icon: string }> = [
   { key: 'guide', label: '快速开始', icon: 'rocket_launch' },
   { key: 'prep', label: '训练准备', icon: 'folder' },
@@ -482,97 +419,6 @@ const DISTILL_TEXT_PRESET_OPTIONS: DistillTextPresetOption[] = [
     loadContent: async () => (await import('../../SampleText/15万字文本库.txt?raw')).default,
   },
 ]
-
-const nowId = () => Date.now() + Math.floor(Math.random() * 100000)
-
-const defaultSoundboardEditorConfig = (): SoundboardEditorConfig => ({
-  selectedGroupId: 1,
-  portraitLayout: 'list',
-  landscapeLayout: 'grid_5',
-  groups: [
-    {
-      id: 1,
-      title: '常用音效',
-      icon: 'music_note',
-      keywordWakeEnabled: true,
-      items: [],
-    },
-  ],
-})
-
-const normalizeSoundboardLayoutValue = (value: unknown, fallback: SoundboardLayoutValue): SoundboardLayoutValue => {
-  return SOUNDBOARD_LAYOUT_OPTIONS.some((item) => item.value === value) ? (value as SoundboardLayoutValue) : fallback
-}
-
-const normalizeSoundboardEditorConfig = (input: unknown): SoundboardEditorConfig => {
-  const fallback = defaultSoundboardEditorConfig()
-  if (!input || typeof input !== 'object') return fallback
-  const root = input as Partial<SoundboardEditorConfig>
-  const groupsRaw = Array.isArray(root.groups) ? root.groups : []
-  const groups = groupsRaw
-    .map((groupRaw, groupIndex) => {
-      const group = groupRaw as Partial<SoundboardEditorGroup>
-      const itemsRaw = Array.isArray(group.items) ? group.items : []
-      const items = itemsRaw.map((itemRaw, itemIndex) => {
-        const item = itemRaw as Partial<SoundboardEditorItem>
-        const duration = Number(item.durationMs) || 0
-        return {
-          id: Number(item.id) || nowId() + itemIndex,
-          title: String(item.title || '').trim() || '新音效',
-          wakeWord: String(item.wakeWord || '').trim(),
-          audioPath: String(item.audioPath || '').trim(),
-          durationMs: Math.max(0, duration),
-          trimStartMs: Math.max(0, Number(item.trimStartMs) || 0),
-          trimEndMs: Math.max(0, Number(item.trimEndMs) || duration || 0),
-        }
-      })
-      return {
-        id: Number(group.id) || groupIndex + 1,
-        title: String(group.title || '').trim() || '未命名分组',
-        icon: String(group.icon || '').trim() || 'music_note',
-        keywordWakeEnabled: group.keywordWakeEnabled !== false,
-        items,
-      }
-    })
-    .filter((group) => group.title || group.items.length)
-  const safeGroups = groups.length ? groups : fallback.groups
-  const selectedGroupId = Number(root.selectedGroupId)
-  return {
-    selectedGroupId: safeGroups.some((group) => group.id === selectedGroupId) ? selectedGroupId : safeGroups[0].id,
-    portraitLayout: normalizeSoundboardLayoutValue(root.portraitLayout, 'list'),
-    landscapeLayout: normalizeSoundboardLayoutValue(root.landscapeLayout, 'grid_5'),
-    groups: safeGroups,
-  }
-}
-
-const readSavedSoundboardEditorConfig = (): SoundboardEditorConfig => {
-  try {
-    const raw = window.localStorage.getItem(SOUNDBOARD_EDITOR_STORAGE_KEY)
-    if (!raw) return defaultSoundboardEditorConfig()
-    return normalizeSoundboardEditorConfig(JSON.parse(raw))
-  } catch {
-    return defaultSoundboardEditorConfig()
-  }
-}
-
-const soundboardFileTitle = (filePath: string) => {
-  const name = filePath.split(/[\\/]/).pop() || '新音效'
-  return name.replace(/\.[^.]+$/, '').trim() || '新音效'
-}
-
-const isSoundboardAudioPath = (filePath: string) => {
-  const ext = filePath.split('.').pop()?.toLowerCase() || ''
-  return SOUNDBOARD_AUDIO_EXTENSIONS.includes(ext)
-}
-
-const formatDurationMsForSoundboard = (ms: number) => {
-  const safe = Math.max(0, Math.floor(ms || 0))
-  const totalSeconds = Math.floor(safe / 1000)
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  const fraction = Math.floor((safe % 1000) / 100)
-  return `${minutes}:${String(seconds).padStart(2, '0')}.${fraction}`
-}
 
 const MsIcon = ({
   name,
@@ -2370,7 +2216,7 @@ function App() {
     for (const audioPath of audioPaths) {
       const durationMs = await readSoundboardAudioDurationMs(audioPath)
       items.push({
-        id: nowId(),
+        id: createSoundboardId(),
         title: soundboardFileTitle(audioPath),
         wakeWord: '',
         audioPath,
@@ -2427,7 +2273,7 @@ function App() {
   }
 
   const addSoundboardGroup = () => {
-    const id = nowId()
+    const id = createSoundboardId()
     updateSoundboardConfig((prev) => ({
       ...prev,
       selectedGroupId: id,
@@ -9062,52 +8908,6 @@ function App() {
                   删除
                 </Button>
               </Stack>
-            </Stack>
-          </Paper>
-
-          <Paper sx={cardPaperSx}>
-            <Stack spacing={1.5}>
-              <Typography variant="subtitle1" fontWeight={600}>
-                手机端布局默认值
-              </Typography>
-              <FormControl size="small" fullWidth>
-                <InputLabel>竖屏布局</InputLabel>
-                <Select
-                  value={soundboardConfig.portraitLayout}
-                  label="竖屏布局"
-                  onChange={(event) =>
-                    updateSoundboardConfig((prev) => ({
-                      ...prev,
-                      portraitLayout: event.target.value as SoundboardLayoutValue,
-                    }))
-                  }
-                >
-                  {SOUNDBOARD_LAYOUT_OPTIONS.filter((item) => !['grid_7', 'grid_8'].includes(item.value)).map((item) => (
-                    <MenuItem key={item.value} value={item.value}>
-                      {item.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <FormControl size="small" fullWidth>
-                <InputLabel>横屏布局</InputLabel>
-                <Select
-                  value={soundboardConfig.landscapeLayout}
-                  label="横屏布局"
-                  onChange={(event) =>
-                    updateSoundboardConfig((prev) => ({
-                      ...prev,
-                      landscapeLayout: event.target.value as SoundboardLayoutValue,
-                    }))
-                  }
-                >
-                  {SOUNDBOARD_LAYOUT_OPTIONS.map((item) => (
-                    <MenuItem key={item.value} value={item.value}>
-                      {item.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
               <Button variant="text" color="inherit" startIcon={<MsIcon name="restart_alt" size={17} />} onClick={resetSoundboardEditor}>
                 新建空白音效包
               </Button>

@@ -372,8 +372,6 @@ function normalizeSoundboardExportConfig(config) {
   const groups = Array.isArray(config?.groups) ? config.groups : [];
   return {
     selectedGroupId: Number(config?.selectedGroupId) || Number(groups[0]?.id) || 1,
-    portraitLayout: String(config?.portraitLayout || 'list'),
-    landscapeLayout: String(config?.landscapeLayout || 'grid_5'),
     groups: groups.map((group, groupIndex) => ({
       id: Number(group?.id) || groupIndex + 1,
       title: String(group?.title || '').trim() || '未命名分组',
@@ -421,8 +419,6 @@ async function exportSoundboardPackage(config, outputPath) {
       type: 'soundboard',
       version: 1,
       selectedGroupId: normalized.groups[0]?.id || normalized.selectedGroupId,
-      portraitLayout: normalized.portraitLayout,
-      landscapeLayout: normalized.landscapeLayout,
       groups: normalized.groups.map((group) => ({
         id: group.id,
         title: group.title,
@@ -541,8 +537,6 @@ async function importSoundboardPackage(packagePath) {
       message: `已导入 ${groups.length} 个分组。`,
       config: {
         selectedGroupId: Number(root.selectedGroupId) || groups[0].id,
-        portraitLayout: String(root.portraitLayout || 'list'),
-        landscapeLayout: String(root.landscapeLayout || 'grid_5'),
         groups,
       },
     };
