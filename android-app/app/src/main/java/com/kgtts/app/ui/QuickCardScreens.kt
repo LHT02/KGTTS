@@ -74,12 +74,10 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.indication
@@ -1380,11 +1378,6 @@ internal fun QuickCardSortRow(
         label = "quick_card_sort_item_elevation"
     )
     val cardContainerColor = md2CardContainerColor()
-    val rowBorderColor by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.78f) else Color.Transparent,
-        animationSpec = tween(140, easing = FastOutSlowInEasing),
-        label = "quick_card_sort_selected_border"
-    )
     val rowOverlayColor by animateColorAsState(
         targetValue = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent,
         animationSpec = tween(140, easing = FastOutSlowInEasing),
@@ -1410,7 +1403,6 @@ internal fun QuickCardSortRow(
                 .fillMaxWidth()
                 .heightIn(min = 72.dp)
                 .background(rowOverlayColor)
-                .border(1.dp, rowBorderColor, RoundedCornerShape(UiTokens.Radius))
         ) {
             Row(
                 modifier = Modifier

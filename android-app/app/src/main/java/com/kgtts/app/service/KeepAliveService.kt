@@ -56,6 +56,7 @@ class KeepAliveService : Service() {
             .setContentTitle("KIGTTS 后台运行中")
             .setContentText("保持录音与播放在锁屏/息屏下持续运行")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setColor(0xFF038387.toInt())
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()

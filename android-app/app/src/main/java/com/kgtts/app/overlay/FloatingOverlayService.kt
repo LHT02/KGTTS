@@ -2061,6 +2061,7 @@ class FloatingOverlayService : Service() {
             .setContentTitle("KIGTTS 悬浮窗")
             .setContentText("悬浮窗正在运行")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setColor(overlayPrimaryColor())
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setOngoing(true)
             .build()
