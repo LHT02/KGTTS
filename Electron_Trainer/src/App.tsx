@@ -62,6 +62,7 @@ import logoWhite from '../../ARTS/LOGOWhite.svg'
 import openSourceLicensesText from './legal/open_source_licenses.md?raw'
 import privacyPolicyText from './legal/privacy_policy.md?raw'
 import { MsIcon } from './components/MsIcon'
+import { DistillTextSourcesCard } from './components/training/DistillTextSourcesCard'
 import { PiperModePanel } from './components/training/PiperModePanel'
 import { ProjectOutputCard } from './components/training/ProjectOutputCard'
 import { ResumeProjectPanel } from './components/training/ResumeProjectPanel'
@@ -6334,99 +6335,22 @@ function App() {
             </Box>
           </Paper>
 
-          <Paper sx={cardPaperSx}>
-            <Stack direction="row" alignItems="center" justifyContent="space-between">
-              <Typography variant="subtitle1" fontWeight={600}>
-                文本来源
-              </Typography>
-              <Stack direction="row" spacing={1}>
-                <Tooltip title="添加文本来源" arrow>
-                  <IconButton size="small" onClick={(event) => setDistillAddAnchorEl(event.currentTarget)}>
-                    <MsIcon name="add" size={20} />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="清空文本来源" arrow>
-                  <IconButton size="small" onClick={clearDistillSources}>
-                    <MsIcon name="delete" size={20} />
-                  </IconButton>
-                </Tooltip>
-              </Stack>
-            </Stack>
-            <Box
-              sx={{
-                mt: 1,
-                border: '1px dashed',
-                borderColor: distillSourcesDragActive ? 'primary.main' : 'transparent',
-                borderRadius: 1,
-                p: 1,
-                transition: 'border-color 0.15s ease',
-              }}
-              onDragOver={(event) => {
-                event.preventDefault()
-                if (event.dataTransfer) {
-                  event.dataTransfer.dropEffect = 'copy'
-                }
-                setDistillSourcesDragActive(true)
-              }}
-              onDragLeave={() => setDistillSourcesDragActive(false)}
-              onDrop={handleDistillSourcesDrop}
-            >
-              <List dense sx={{ maxHeight: 240, overflow: 'auto' }}>
-                {activeDistillTextSources.length === 0 && (
-                  <ListItem>
-                    <ListItemText primary="暂无文本来源" secondary={DISTILL_TEXT_SOURCE_EMPTY_HINT} />
-                  </ListItem>
-                )}
-                {activeDistillTextSources.map((item) => (
-                  <ListItem
-                    key={`${item.kind}:${item.path}`}
-                    divider
-                    secondaryAction={
-                      <IconButton edge="end" size="small" onClick={() => removeDistillSource(item)}>
-                        <MsIcon name="close" size={18} />
-                      </IconButton>
-                    }
-                  >
-                    <ListItemIcon sx={{ minWidth: 28 }}>
-                      <MsIcon name={item.kind === 'project_dir' ? 'folder' : 'article'} size={18} />
-                    </ListItemIcon>
-                    <ListItemText primary={getDistillSourcePrimaryText(item)} secondary={getDistillSourceSecondaryText(item)} />
-                  </ListItem>
-                ))}
-              </List>
-            </Box>
-            <Popover
-              open={Boolean(distillAddAnchorEl)}
-              anchorEl={distillAddAnchorEl}
-              onClose={() => setDistillAddAnchorEl(null)}
-              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-              transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-            >
-              <List dense sx={{ py: 0.5, minWidth: 180 }}>
-                <ListItemButton
-                  onClick={() => {
-                    openDistillPresetDialog()
-                  }}
-                >
-                  <ListItemIcon sx={{ minWidth: 32 }}>
-                    <MsIcon name="library_books" size={18} />
-                  </ListItemIcon>
-                  <ListItemText primary="添加预设文件" secondary="内置 5 万 / 10 万 / 15 万字版本" />
-                </ListItemButton>
-                <ListItemButton
-                  onClick={() => {
-                    setDistillAddAnchorEl(null)
-                    void pickDistillTextFiles()
-                  }}
-                >
-                  <ListItemIcon sx={{ minWidth: 32 }}>
-                    <MsIcon name="article" size={18} />
-                  </ListItemIcon>
-                  <ListItemText primary="导入自定义文本文件" secondary=".txt / .csv / .jsonl" />
-                </ListItemButton>
-              </List>
-            </Popover>
-          </Paper>
+          <DistillTextSourcesCard
+            cardPaperSx={cardPaperSx}
+            sources={activeDistillTextSources}
+            dragActive={distillSourcesDragActive}
+            emptyHint={DISTILL_TEXT_SOURCE_EMPTY_HINT}
+            addAnchorEl={distillAddAnchorEl}
+            onAddAnchorChange={setDistillAddAnchorEl}
+            onClearSources={clearDistillSources}
+            onDragActiveChange={setDistillSourcesDragActive}
+            onDrop={handleDistillSourcesDrop}
+            onOpenPresetDialog={openDistillPresetDialog}
+            onPickTextFiles={pickDistillTextFiles}
+            onRemoveSource={removeDistillSource}
+            getSourcePrimaryText={getDistillSourcePrimaryText}
+            getSourceSecondaryText={getDistillSourceSecondaryText}
+          />
 
           <Paper sx={cardPaperSx}>
             <Stack direction="row" alignItems="center" justifyContent="space-between">
@@ -6942,99 +6866,22 @@ function App() {
             </Stack>
           </Paper>
 
-          <Paper sx={cardPaperSx}>
-            <Stack direction="row" alignItems="center" justifyContent="space-between">
-              <Typography variant="subtitle1" fontWeight={600}>
-                文本来源
-              </Typography>
-              <Stack direction="row" spacing={1}>
-                <Tooltip title="添加文本来源" arrow>
-                  <IconButton size="small" onClick={(event) => setDistillAddAnchorEl(event.currentTarget)}>
-                    <MsIcon name="add" size={20} />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="清空文本来源" arrow>
-                  <IconButton size="small" onClick={clearDistillSources}>
-                    <MsIcon name="delete" size={20} />
-                  </IconButton>
-                </Tooltip>
-              </Stack>
-            </Stack>
-            <Box
-              sx={{
-                mt: 1,
-                border: '1px dashed',
-                borderColor: distillSourcesDragActive ? 'primary.main' : 'transparent',
-                borderRadius: 1,
-                p: 1,
-                transition: 'border-color 0.15s ease',
-              }}
-              onDragOver={(event) => {
-                event.preventDefault()
-                if (event.dataTransfer) {
-                  event.dataTransfer.dropEffect = 'copy'
-                }
-                setDistillSourcesDragActive(true)
-              }}
-              onDragLeave={() => setDistillSourcesDragActive(false)}
-              onDrop={handleDistillSourcesDrop}
-            >
-              <List dense sx={{ maxHeight: 240, overflow: 'auto' }}>
-                {activeDistillTextSources.length === 0 && (
-                  <ListItem>
-                    <ListItemText primary="暂无文本来源" secondary={DISTILL_TEXT_SOURCE_EMPTY_HINT} />
-                  </ListItem>
-                )}
-                {activeDistillTextSources.map((item) => (
-                  <ListItem
-                    key={`${item.kind}:${item.path}`}
-                    divider
-                    secondaryAction={
-                      <IconButton edge="end" size="small" onClick={() => removeDistillSource(item)}>
-                        <MsIcon name="close" size={18} />
-                      </IconButton>
-                    }
-                  >
-                    <ListItemIcon sx={{ minWidth: 28 }}>
-                      <MsIcon name={item.kind === 'project_dir' ? 'folder' : 'article'} size={18} />
-                    </ListItemIcon>
-                    <ListItemText primary={getDistillSourcePrimaryText(item)} secondary={getDistillSourceSecondaryText(item)} />
-                  </ListItem>
-                ))}
-              </List>
-            </Box>
-            <Popover
-              open={Boolean(distillAddAnchorEl)}
-              anchorEl={distillAddAnchorEl}
-              onClose={() => setDistillAddAnchorEl(null)}
-              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-              transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-            >
-              <List dense sx={{ py: 0.5, minWidth: 180 }}>
-                <ListItemButton
-                  onClick={() => {
-                    openDistillPresetDialog()
-                  }}
-                >
-                  <ListItemIcon sx={{ minWidth: 32 }}>
-                    <MsIcon name="library_books" size={18} />
-                  </ListItemIcon>
-                  <ListItemText primary="添加预设文件" secondary="内置 5 万 / 10 万 / 15 万字版本" />
-                </ListItemButton>
-                <ListItemButton
-                  onClick={() => {
-                    setDistillAddAnchorEl(null)
-                    void pickDistillTextFiles()
-                  }}
-                >
-                  <ListItemIcon sx={{ minWidth: 32 }}>
-                    <MsIcon name="article" size={18} />
-                  </ListItemIcon>
-                  <ListItemText primary="导入自定义文本文件" secondary=".txt / .csv / .jsonl" />
-                </ListItemButton>
-              </List>
-            </Popover>
-          </Paper>
+          <DistillTextSourcesCard
+            cardPaperSx={cardPaperSx}
+            sources={activeDistillTextSources}
+            dragActive={distillSourcesDragActive}
+            emptyHint={DISTILL_TEXT_SOURCE_EMPTY_HINT}
+            addAnchorEl={distillAddAnchorEl}
+            onAddAnchorChange={setDistillAddAnchorEl}
+            onClearSources={clearDistillSources}
+            onDragActiveChange={setDistillSourcesDragActive}
+            onDrop={handleDistillSourcesDrop}
+            onOpenPresetDialog={openDistillPresetDialog}
+            onPickTextFiles={pickDistillTextFiles}
+            onRemoveSource={removeDistillSource}
+            getSourcePrimaryText={getDistillSourcePrimaryText}
+            getSourceSecondaryText={getDistillSourceSecondaryText}
+          />
 
           <Paper sx={cardPaperSx}>
             <Stack direction="row" alignItems="center" justifyContent="space-between">
