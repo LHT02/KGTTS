@@ -63,6 +63,8 @@ import openSourceLicensesText from './legal/open_source_licenses.md?raw'
 import privacyPolicyText from './legal/privacy_policy.md?raw'
 import { MsIcon } from './components/MsIcon'
 import { AboutPage } from './pages/AboutPage'
+import { LogsPage } from './pages/LogsPage'
+import { VoicePreviewPage } from './pages/VoicePreviewPage'
 import {
   SOUNDBOARD_AUDIO_EXTENSIONS,
   SOUNDBOARD_EDITOR_STORAGE_KEY,
@@ -8556,99 +8558,30 @@ function App() {
   )
 
   const previewContent = (
-    <Stack spacing={2}>
-      <Paper sx={cardPaperSx}>
-        <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-          语音包试听
-        </Typography>
-        <Stack spacing={2}>
-          <PathField
-            label="语音包文件或目录"
-            value={previewVoicepack}
-            onChange={setPreviewVoicepack}
-            onPick={pickPreviewVoicepack}
-            onDropPath={setPreviewVoicepack}
-            onDropFiles={saveDroppedFileSingle}
-          />
-          <TextField
-            label="试听文本"
-            value={previewText}
-            onChange={(e) => setPreviewText(e.target.value)}
-            multiline
-            minRows={3}
-            fullWidth
-          />
-          <Stack direction="row" spacing={1}>
-            <Button
-              variant="contained"
-              startIcon={<MsIcon name="play_arrow" size={18} />}
-              onClick={startPreview}
-              disabled={previewBusy || pipelineRunning}
-            >
-              {previewBusy ? '生成中...' : '生成试听'}
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<MsIcon name="download" size={18} />}
-              onClick={exportPreviewAudio}
-              disabled={!previewAudioPath}
-            >
-              导出音频
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<MsIcon name="folder_open" size={18} />}
-              onClick={openCurrentVoicepackDirectory}
-              disabled={!previewVoicepack.trim()}
-            >
-              打开当前语音包目录
-            </Button>
-          </Stack>
-          {previewBusy && <LinearProgress />}
-        </Stack>
-      </Paper>
-
-      <Paper sx={cardPaperSx}>
-        <Typography variant="subtitle1" fontWeight={600}>
-          播放器
-        </Typography>
-        <Stack spacing={1} sx={{ mt: 1 }}>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Tooltip title={previewPlaying ? '暂停' : '播放'} arrow>
-              <span>
-                <IconButton color="primary" onClick={togglePreviewPlay} disabled={!hasPreviewAudio}>
-                  <MsIcon name={previewPlaying ? 'pause' : 'play_arrow'} size={20} fill={1} />
-                </IconButton>
-              </span>
-            </Tooltip>
-            <Tooltip title="停止" arrow>
-              <span>
-                <IconButton onClick={stopPreviewPlay} disabled={!hasPreviewAudio}>
-                  <MsIcon name="stop" size={20} fill={1} />
-                </IconButton>
-              </span>
-            </Tooltip>
-            <Box sx={{ flex: 1, px: 1 }}>
-              <Slider
-                size="small"
-                min={0}
-                max={previewDuration > 0 ? previewDuration : 1}
-                step={0.01}
-                value={hasPreviewAudio ? Math.min(previewCurrentTime, previewDuration || 1) : 0}
-                onChange={seekPreviewPlay}
-                disabled={!hasPreviewAudio}
-              />
-            </Box>
-            <Typography variant="caption" sx={{ minWidth: 96, textAlign: 'right', opacity: 0.75 }}>
-              {formatTime(previewCurrentTime)} / {formatTime(previewDuration)}
-            </Typography>
-          </Stack>
-          <Typography variant="caption" sx={{ opacity: 0.75, wordBreak: 'break-all' }}>
-            {previewAudioPath || '暂无试听音频'}
-          </Typography>
-        </Stack>
-      </Paper>
-    </Stack>
+    <VoicePreviewPage
+      cardPaperSx={cardPaperSx}
+      PathFieldComponent={PathField}
+      previewVoicepack={previewVoicepack}
+      previewText={previewText}
+      previewBusy={previewBusy}
+      pipelineRunning={pipelineRunning}
+      previewAudioPath={previewAudioPath}
+      hasPreviewAudio={hasPreviewAudio}
+      previewPlaying={previewPlaying}
+      previewCurrentTime={previewCurrentTime}
+      previewDuration={previewDuration}
+      onPreviewVoicepackChange={setPreviewVoicepack}
+      onPreviewTextChange={setPreviewText}
+      onPickPreviewVoicepack={pickPreviewVoicepack}
+      onDropFiles={saveDroppedFileSingle}
+      onStartPreview={startPreview}
+      onExportPreviewAudio={exportPreviewAudio}
+      onOpenCurrentVoicepackDirectory={openCurrentVoicepackDirectory}
+      onTogglePreviewPlay={togglePreviewPlay}
+      onStopPreviewPlay={stopPreviewPlay}
+      onSeekPreviewPlay={seekPreviewPlay}
+      formatTime={formatTime}
+    />
   )
 
   const soundboardContent = (
@@ -9173,48 +9106,7 @@ function App() {
   )
 
   const logsContent = (
-    <Paper sx={{ ...cardPaperSx, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between">
-        <Typography variant="subtitle1" fontWeight={600}>
-          日志
-        </Typography>
-        <Stack direction="row" alignItems="center" spacing={0.5}>
-          <Chip
-            label={connected ? '后台服务已连接' : '后台服务未连接'}
-            color={connected ? 'success' : 'default'}
-            variant="outlined"
-            size="small"
-          />
-          <Tooltip title="导出日志" arrow>
-            <IconButton size="small" onClick={exportLogs}>
-              <MsIcon name="download" size={18} />
-            </IconButton>
-          </Tooltip>
-        </Stack>
-      </Stack>
-      <Box
-        className="allow-text-select"
-        sx={{
-          mt: 1,
-          flex: 1,
-          minHeight: 0,
-          overflow: 'auto',
-          fontFamily: 'Menlo, Consolas, monospace',
-          fontSize: 12,
-          whiteSpace: 'pre-wrap',
-        }}
-      >
-        {logs.length === 0 ? (
-          <Typography variant="caption" sx={{ opacity: 0.6 }}>
-            暂无日志
-          </Typography>
-        ) : (
-          logs.map((line, idx) => (
-            <Box key={`${idx}-${line}`}>{line}</Box>
-          ))
-        )}
-      </Box>
-    </Paper>
+    <LogsPage cardPaperSx={cardPaperSx} connected={connected} logs={logs} onExportLogs={exportLogs} />
   )
 
   const aboutContent = (
