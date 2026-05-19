@@ -122,6 +122,7 @@ class VolumeHotkeyService : Service() {
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("KIGTTS 音量热键")
             .setContentText(activeHotkeySummary())
+            .setColor(0xFF038387.toInt())
             .setOngoing(true)
             .setShowWhen(false)
             .setOnlyAlertOnce(true)

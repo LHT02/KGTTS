@@ -108,6 +108,7 @@ object LiveSubtitleNotificationBridge {
         return NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_live_subtitle_notification_logo)
             .setLargeIcon(loadLogoBitmap(context))
+            .setColor(0xFF038387.toInt())
             .setContentTitle("KIGTTS")
             .setContentText(status)
             .setTicker(text)

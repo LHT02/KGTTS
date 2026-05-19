@@ -74,12 +74,10 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.indication
@@ -3269,16 +3267,11 @@ internal fun GroupIconPickerRow(
                 MsIcon(selectedIcon, contentDescription = null)
             }
         }
-        Column(modifier = Modifier.weight(1f)) {
-            Text("分组图标", fontWeight = FontWeight.SemiBold)
-            Text(
-                selectedIcon,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
+        Text(
+            text = "分组图标",
+            modifier = Modifier.weight(1f),
+            fontWeight = FontWeight.SemiBold
+        )
         MsIcon("widgets", contentDescription = "选择分组图标")
     }
 
@@ -3304,30 +3297,24 @@ internal fun GroupIconPickerRow(
                         items(iconChoices.size) { index ->
                             val icon = iconChoices[index]
                             val selected = icon == selectedIcon
-                            Surface(
+                            Box(
                                 modifier = Modifier
-                                    .size(42.dp)
+                                    .size(48.dp)
                                     .clip(CircleShape)
+                                    .background(
+                                        if (selected) {
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                        } else {
+                                            Color.Transparent
+                                        }
+                                    )
                                     .clickable {
                                         onIconSelected(icon)
                                         showDialog = false
                                     },
-                                shape = CircleShape,
-                                color = if (selected) {
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.58f)
-                                },
-                                border = if (selected) {
-                                    BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
-                                } else {
-                                    null
-                                },
-                                elevation = 0.dp
+                                contentAlignment = Alignment.Center
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    MsIcon(icon, contentDescription = icon)
-                                }
+                                MsIcon(icon, contentDescription = null)
                             }
                         }
                     }

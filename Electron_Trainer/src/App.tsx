@@ -35,7 +35,6 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
-  Link,
   MenuItem,
   Popover,
   Paper,
@@ -60,11 +59,34 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import logoBlack from '../../ARTS/LOGOBlack.svg'
 import logoWhite from '../../ARTS/LOGOWhite.svg'
-import avatarHuajiang from '../../ARTS/Avatar/huajiang.jpg'
-import avatarLht from '../../ARTS/Avatar/LHT.jpg'
-import avatarYuiLu from '../../ARTS/Avatar/YuiLu.jpg'
 import openSourceLicensesText from './legal/open_source_licenses.md?raw'
 import privacyPolicyText from './legal/privacy_policy.md?raw'
+import { MsIcon } from './components/MsIcon'
+import { PiperModePanel } from './components/training/PiperModePanel'
+import { ResumeProjectPanel } from './components/training/ResumeProjectPanel'
+import { AboutPage } from './pages/AboutPage'
+import { LogsPage } from './pages/LogsPage'
+import { QuickStartPage } from './pages/QuickStartPage'
+import { SettingsPage } from './pages/SettingsPage'
+import { VoicePreviewPage } from './pages/VoicePreviewPage'
+import {
+  SOUNDBOARD_AUDIO_EXTENSIONS,
+  SOUNDBOARD_EDITOR_STORAGE_KEY,
+  SOUNDBOARD_GROUP_ICONS,
+  createSoundboardId,
+  defaultSoundboardEditorConfig,
+  formatDurationMsForSoundboard,
+  isSoundboardAudioPath,
+  normalizeSoundboardEditorConfig,
+  readSavedSoundboardEditorConfig,
+  soundboardFileTitle,
+  type SoundboardBatchEditState,
+  type SoundboardEditorConfig,
+  type SoundboardEditorGroup,
+  type SoundboardEditorItem,
+  type SoundboardItemDragState,
+  type SoundboardPreviewPlaybackState,
+} from './features/soundboardEditor'
 
 type ProgressStage = Exclude<PipelineStage, 'idle' | 'preview' | 'runtime'>
 type ProgressMap = Record<ProgressStage, number>
@@ -161,12 +183,6 @@ type VoxcpmBootstrapContext = {
   launchOnConfirm?: boolean
 }
 
-type AboutCreator = {
-  name: string
-  homepage: string
-  avatar: string
-}
-
 type DependencyGuideTarget =
   | 'trainer_resources'
   | 'piper_runtime'
@@ -202,61 +218,6 @@ type DistillTextPresetOption = {
   recommended?: boolean
 }
 
-type SoundboardLayoutValue = 'list' | 'grid_2' | 'grid_3' | 'grid_4' | 'grid_5' | 'grid_6' | 'grid_7' | 'grid_8'
-
-type SoundboardEditorItem = {
-  id: number
-  title: string
-  wakeWord: string
-  audioPath: string
-  durationMs: number
-  trimStartMs: number
-  trimEndMs: number
-}
-
-type SoundboardEditorGroup = {
-  id: number
-  title: string
-  icon: string
-  keywordWakeEnabled: boolean
-  items: SoundboardEditorItem[]
-}
-
-type SoundboardEditorConfig = {
-  selectedGroupId: number
-  portraitLayout: SoundboardLayoutValue
-  landscapeLayout: SoundboardLayoutValue
-  groups: SoundboardEditorGroup[]
-}
-
-type SoundboardBatchEditState = {
-  titlePrefix: string
-  titleSuffix: string
-  wakeWord: string
-  replaceWakeWord: boolean
-  targetGroupId: string
-}
-
-type SoundboardItemDragState = {
-  itemId: number
-  pointerId: number
-  originIndex: number
-  targetIndex: number
-  startY: number
-  pointerOffsetY: number
-  rowHeight: number
-  rowGap: number
-  rowCenters: number[]
-  startScrollTop: number
-}
-
-type SoundboardPreviewPlaybackState = {
-  playing: boolean
-  currentTime: number
-  duration: number
-  requestId: number
-}
-
 type GsviAttributionFields = {
   gsvAuthor: string
   gsvTrainer: string
@@ -278,7 +239,6 @@ const DRAWER_EXPANDED_STORAGE_KEY = 'kgtts_drawer_expanded'
 const DISTILL_SETTINGS_STORAGE_KEY = 'kigtts_gsv_distill_settings'
 const VOXCPM_SETTINGS_STORAGE_KEY = 'kigtts_voxcpm_distill_settings'
 const DISTILL_MODE_STORAGE_KEY = 'kigtts_training_mode'
-const SOUNDBOARD_EDITOR_STORAGE_KEY = 'kigtts_soundboard_editor_config'
 const GSVI_CONFIRM_SKIP_STORAGE_KEY = 'kigtts_gsvi_confirm_skip'
 const GSVI_MODE_INTRO_SKIP_STORAGE_KEY = 'kigtts_gsvi_mode_intro_skip'
 const GSVI_GUIDE_URL = 'https://www.yuque.com/baicaigongchang1145haoyuangong/ib3g1e/gos50nrqrlipryqq'
@@ -398,31 +358,6 @@ const GSVI_REQUIRED_NAMES = {
   gsviPacker: 'AI-Hobbyist',
 } as const
 const DISTILL_TEXT_SOURCE_EMPTY_HINT = '点击右上角 + 添加内置预设文本，或导入 / 拖入自定义 .txt、.csv、.jsonl 文本文件。'
-const SOUNDBOARD_AUDIO_EXTENSIONS = ['wav', 'mp3', 'm4a', 'aac', 'flac', 'ogg', 'opus']
-const SOUNDBOARD_GROUP_ICONS = [
-  'music_note',
-  'campaign',
-  'mood',
-  'celebration',
-  'pets',
-  'favorite',
-  'stars',
-  'sports_esports',
-  'notifications',
-  'record_voice_over',
-  'theater_comedy',
-  'bolt',
-]
-const SOUNDBOARD_LAYOUT_OPTIONS: Array<{ value: SoundboardLayoutValue; label: string }> = [
-  { value: 'list', label: '列表' },
-  { value: 'grid_2', label: '两列宫格' },
-  { value: 'grid_3', label: '三列宫格' },
-  { value: 'grid_4', label: '四列宫格' },
-  { value: 'grid_5', label: '五列宫格' },
-  { value: 'grid_6', label: '六列宫格' },
-  { value: 'grid_7', label: '七列宫格' },
-  { value: 'grid_8', label: '八列宫格' },
-]
 const NAV_ITEMS: Array<{ key: AppPage; label: string; icon: string }> = [
   { key: 'guide', label: '快速开始', icon: 'rocket_launch' },
   { key: 'prep', label: '训练准备', icon: 'folder' },
@@ -433,24 +368,6 @@ const NAV_ITEMS: Array<{ key: AppPage; label: string; icon: string }> = [
   { key: 'about', label: '关于', icon: 'info' },
 ]
 const APP_VERSION = __APP_VERSION__
-
-const ABOUT_CREATORS: AboutCreator[] = [
-  {
-    name: 'LHT',
-    homepage: 'https://space.bilibili.com/87244951',
-    avatar: avatarLht,
-  },
-  {
-    name: 'Yui Lu',
-    homepage: 'https://space.bilibili.com/23208863',
-    avatar: avatarYuiLu,
-  },
-  {
-    name: '花酱',
-    homepage: 'https://space.bilibili.com/573842321',
-    avatar: avatarHuajiang,
-  },
-]
 
 const DISTILL_TEXT_PRESET_OPTIONS: DistillTextPresetOption[] = [
   {
@@ -482,130 +399,6 @@ const DISTILL_TEXT_PRESET_OPTIONS: DistillTextPresetOption[] = [
     loadContent: async () => (await import('../../SampleText/15万字文本库.txt?raw')).default,
   },
 ]
-
-const nowId = () => Date.now() + Math.floor(Math.random() * 100000)
-
-const defaultSoundboardEditorConfig = (): SoundboardEditorConfig => ({
-  selectedGroupId: 1,
-  portraitLayout: 'list',
-  landscapeLayout: 'grid_5',
-  groups: [
-    {
-      id: 1,
-      title: '常用音效',
-      icon: 'music_note',
-      keywordWakeEnabled: true,
-      items: [],
-    },
-  ],
-})
-
-const normalizeSoundboardLayoutValue = (value: unknown, fallback: SoundboardLayoutValue): SoundboardLayoutValue => {
-  return SOUNDBOARD_LAYOUT_OPTIONS.some((item) => item.value === value) ? (value as SoundboardLayoutValue) : fallback
-}
-
-const normalizeSoundboardEditorConfig = (input: unknown): SoundboardEditorConfig => {
-  const fallback = defaultSoundboardEditorConfig()
-  if (!input || typeof input !== 'object') return fallback
-  const root = input as Partial<SoundboardEditorConfig>
-  const groupsRaw = Array.isArray(root.groups) ? root.groups : []
-  const groups = groupsRaw
-    .map((groupRaw, groupIndex) => {
-      const group = groupRaw as Partial<SoundboardEditorGroup>
-      const itemsRaw = Array.isArray(group.items) ? group.items : []
-      const items = itemsRaw.map((itemRaw, itemIndex) => {
-        const item = itemRaw as Partial<SoundboardEditorItem>
-        const duration = Number(item.durationMs) || 0
-        return {
-          id: Number(item.id) || nowId() + itemIndex,
-          title: String(item.title || '').trim() || '新音效',
-          wakeWord: String(item.wakeWord || '').trim(),
-          audioPath: String(item.audioPath || '').trim(),
-          durationMs: Math.max(0, duration),
-          trimStartMs: Math.max(0, Number(item.trimStartMs) || 0),
-          trimEndMs: Math.max(0, Number(item.trimEndMs) || duration || 0),
-        }
-      })
-      return {
-        id: Number(group.id) || groupIndex + 1,
-        title: String(group.title || '').trim() || '未命名分组',
-        icon: String(group.icon || '').trim() || 'music_note',
-        keywordWakeEnabled: group.keywordWakeEnabled !== false,
-        items,
-      }
-    })
-    .filter((group) => group.title || group.items.length)
-  const safeGroups = groups.length ? groups : fallback.groups
-  const selectedGroupId = Number(root.selectedGroupId)
-  return {
-    selectedGroupId: safeGroups.some((group) => group.id === selectedGroupId) ? selectedGroupId : safeGroups[0].id,
-    portraitLayout: normalizeSoundboardLayoutValue(root.portraitLayout, 'list'),
-    landscapeLayout: normalizeSoundboardLayoutValue(root.landscapeLayout, 'grid_5'),
-    groups: safeGroups,
-  }
-}
-
-const readSavedSoundboardEditorConfig = (): SoundboardEditorConfig => {
-  try {
-    const raw = window.localStorage.getItem(SOUNDBOARD_EDITOR_STORAGE_KEY)
-    if (!raw) return defaultSoundboardEditorConfig()
-    return normalizeSoundboardEditorConfig(JSON.parse(raw))
-  } catch {
-    return defaultSoundboardEditorConfig()
-  }
-}
-
-const soundboardFileTitle = (filePath: string) => {
-  const name = filePath.split(/[\\/]/).pop() || '新音效'
-  return name.replace(/\.[^.]+$/, '').trim() || '新音效'
-}
-
-const isSoundboardAudioPath = (filePath: string) => {
-  const ext = filePath.split('.').pop()?.toLowerCase() || ''
-  return SOUNDBOARD_AUDIO_EXTENSIONS.includes(ext)
-}
-
-const formatDurationMsForSoundboard = (ms: number) => {
-  const safe = Math.max(0, Math.floor(ms || 0))
-  const totalSeconds = Math.floor(safe / 1000)
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  const fraction = Math.floor((safe % 1000) / 100)
-  return `${minutes}:${String(seconds).padStart(2, '0')}.${fraction}`
-}
-
-const MsIcon = ({
-  name,
-  size = 20,
-  fill = 0,
-  wght = 500,
-  grad = 0,
-  opsz = 24,
-}: {
-  name: string
-  size?: number
-  fill?: 0 | 1
-  wght?: number
-  grad?: number
-  opsz?: number
-}) => (
-  <Box
-    component="span"
-    className="material-symbols-sharp"
-    sx={{
-      fontSize: size,
-      lineHeight: 1,
-      display: 'inline-flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      userSelect: 'none',
-      fontVariationSettings: `'FILL' ${fill}, 'wght' ${wght}, 'GRAD' ${grad}, 'opsz' ${opsz}`,
-    }}
-    aria-hidden
-  >
-    {name}
-  </Box>
-)
 
 const NumberField = ({
   label,
@@ -1003,52 +796,6 @@ const getDistillSourcePrimaryText = (item: DistillTextSource) => item.label || i
 const getDistillSourceSecondaryText = (item: DistillTextSource) => {
   if (item.description) return item.description
   return item.kind === 'project_dir' ? '旧训练项目目录' : '文本语料文件'
-}
-
-const getCudaRuntimeChipColor = (status: PiperCudaRuntimeStatus | null): 'default' | 'success' | 'warning' | 'error' => {
-  if (!status) return 'default'
-  if (status.status === 'error') return 'error'
-  if (!status.available) return 'warning'
-  if (status.cuda_available === false) return 'warning'
-  return 'success'
-}
-
-const getCudaRuntimeChipLabel = (status: PiperCudaRuntimeStatus | null) => {
-  if (!status) return '未检测'
-  if (status.status === 'error') return '运行时异常'
-  if (!status.available) return '未安装'
-  if (status.cuda_available === false) return '已安装 / CUDA 不可用'
-  return '已就绪'
-}
-
-const getPiperRuntimeChipColor = (status: PiperRuntimeStatus | null): 'default' | 'success' | 'warning' | 'error' => {
-  if (!status) return 'default'
-  if (status.status === 'error') return 'error'
-  if (!status.available) return 'warning'
-  return 'success'
-}
-
-const getPiperRuntimeChipLabel = (status: PiperRuntimeStatus | null) => {
-  if (!status) return '未检测'
-  if (status.status === 'error') return '运行时异常'
-  if (!status.available) return '未安装'
-  return '已就绪'
-}
-
-const getTrainerResourcesChipColor = (status: TrainerResourceStatus | null): 'default' | 'success' | 'warning' | 'error' => {
-  if (!status) return 'default'
-  if (status.status === 'error') return 'error'
-  if (!status.available) return 'warning'
-  if (!status.external_available) return 'warning'
-  return 'success'
-}
-
-const getTrainerResourcesChipLabel = (status: TrainerResourceStatus | null) => {
-  if (!status) return '未检测'
-  if (status.status === 'error') return '资源异常'
-  if (!status.available) return '未安装'
-  if (!status.external_available) return '可用但建议安装'
-  return '已就绪'
 }
 
 const getRuntimeChipColor = (
@@ -2370,7 +2117,7 @@ function App() {
     for (const audioPath of audioPaths) {
       const durationMs = await readSoundboardAudioDurationMs(audioPath)
       items.push({
-        id: nowId(),
+        id: createSoundboardId(),
         title: soundboardFileTitle(audioPath),
         wakeWord: '',
         audioPath,
@@ -2427,7 +2174,7 @@ function App() {
   }
 
   const addSoundboardGroup = () => {
-    const id = nowId()
+    const id = createSoundboardId()
     updateSoundboardConfig((prev) => ({
       ...prev,
       selectedGroupId: id,
@@ -6339,405 +6086,41 @@ function App() {
       </Stack>
     )
 
-  const guideContent = guideStep >= 0 ? (
-    <Stack spacing={2}>
-      <Paper sx={cardPaperSx}>
-        <Stack spacing={1.5}>
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'center' }} justifyContent="space-between">
-            <Box>
-              <Typography variant="h5" fontWeight={700}>
-                快速开始
-              </Typography>
-              <Typography variant="body2" sx={{ mt: 0.5, opacity: 0.74 }}>
-                按步骤制作一个可导入 KIGTTS 手机应用的语音包。
-              </Typography>
-            </Box>
-            <Chip label={`${guideStep + 1}/${GUIDE_STEP_LABELS.length} ${GUIDE_STEP_LABELS[guideStep]}`} color="primary" variant="outlined" />
-          </Stack>
-          <LinearProgress variant="determinate" value={guideStepProgress} />
-          <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-            {GUIDE_STEP_LABELS.map((label, index) => (
-              <Button
-                key={label}
-                size="small"
-                variant={guideStep === index ? 'contained' : 'text'}
-                onClick={() => setGuideStep(index)}
-              >
-                {index + 1}. {label}
-              </Button>
-            ))}
-          </Stack>
-        </Stack>
-      </Paper>
-
-      <Paper sx={cardPaperSx}>{guideStepContent}</Paper>
-
-      <Paper sx={cardPaperSx}>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between">
-          <Button
-            variant="text"
-            startIcon={<MsIcon name="chevron_left" size={18} />}
-            onClick={() => setGuideStep((prev) => Math.max(0, prev - 1))}
-            disabled={guideStep === 0}
-          >
-            上一步
-          </Button>
-          <Button
-            variant={guideStep === guideStepMax || guideNextIsVoxcpmPreview ? 'contained' : 'outlined'}
-            endIcon={
-              <MsIcon
-                name={guideStep === guideStepMax ? 'play_arrow' : guideNextIsVoxcpmPreview ? 'graphic_eq' : 'chevron_right'}
-                size={18}
-              />
-            }
-            onClick={() => {
-              if (guideStep === guideStepMax) {
-                void startPipeline()
-                return
-              }
-              if (guideNextIsVoxcpmPreview) {
-                void startGuideVoxcpmBootstrapPreview()
-                return
-              }
-              setGuideStep((prev) => Math.min(guideStepMax, prev + 1))
-            }}
-            disabled={
-              guideStep === guideStepMax
-                ? pipelineRunning || trainingFabBlockedByBackgroundTask || previewBusy
-                : guideNextIsVoxcpmPreview
-                  ? trainingFabBlockedByBackgroundTask || previewBusy || voxcpmBootstrapPreviewBusy
-                  : false
-            }
-          >
-            {guideStep === guideStepMax ? '开始制作语音包' : guideNextIsVoxcpmPreview ? '试听确认' : '下一步'}
-          </Button>
-        </Stack>
-      </Paper>
-    </Stack>
-  ) : (
-    <Stack spacing={2}>
-      <Paper
-        sx={{
-          ...cardPaperSx,
-          overflow: 'hidden',
-          position: 'relative',
-          background:
-            resolvedThemeMode === 'dark'
-              ? 'linear-gradient(135deg, rgba(0,150,136,0.18), rgba(15,23,42,0.18))'
-              : 'linear-gradient(135deg, rgba(0,150,136,0.10), rgba(236,253,245,0.55))',
-        }}
-      >
-        <Stack spacing={2}>
-          <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', lg: 'center' }} justifyContent="space-between">
-            <Box sx={{ minWidth: 0 }}>
-              <Typography variant="h5" fontWeight={700} gutterBottom>
-                新手训练引导
-              </Typography>
-              <Typography variant="body2" sx={{ opacity: 0.78, maxWidth: 820 }}>
-                不需要先理解 VAD、ASR、蒸馏或 Piper。按下面 5 步检查：选路线、装依赖、准备素材、确认输出、开始训练。
-              </Typography>
-            </Box>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ width: { xs: '100%', lg: 'auto' } }}>
-              <Button
-                variant="contained"
-                startIcon={<MsIcon name="checklist" size={18} />}
-                onClick={() => {
-                  void openGuideDependencyCheck()
-                }}
-                disabled={pipelineRunning || trainingFabBlockedByBackgroundTask}
-              >
-                检查依赖
-              </Button>
-              <Button
-                variant="outlined"
-                startIcon={<MsIcon name="folder" size={18} />}
-                onClick={() => setPage('prep')}
-              >
-                去训练准备
-              </Button>
-            </Stack>
-          </Stack>
-          <Alert severity="info">
-            新手建议：先选择“我有自己的录音”，保持默认 GPU/CUDA 训练。如果当前电脑没有准备 CUDA 运行时，软件会引导你安装；装不上也可以切换 CPU。
-          </Alert>
-        </Stack>
-      </Paper>
-
-      <Paper sx={cardPaperSx}>
-        <Stack spacing={1.5}>
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'center' }} justifyContent="space-between">
-            <Box>
-              <Typography variant="subtitle1" fontWeight={700}>
-                1. 选择你的训练路线
-              </Typography>
-              <Typography variant="body2" sx={{ opacity: 0.72 }}>
-                这里的选择会同步修改“训练准备”页的训练模式。
-              </Typography>
-            </Box>
-            <FormControl size="small" sx={{ minWidth: { xs: '100%', md: 260 } }}>
-              <InputLabel>当前路线</InputLabel>
-              <Select
-                value={trainingMode}
-                label="当前路线"
-                onChange={(event) => handleTrainingModeChange(event.target.value as TrainingMode)}
-                disabled={pipelineRunning}
-              >
-                <MenuItem value="piper">Piper 标准</MenuItem>
-                <MenuItem value="gsv_distill">GPT-SoVITS 蒸馏</MenuItem>
-                <MenuItem value="voxcpm_distill">VoxCPM2 蒸馏</MenuItem>
-                <MenuItem value="resume_project">从旧项目继续训练</MenuItem>
-              </Select>
-            </FormControl>
-          </Stack>
-          <Box sx={{ display: 'grid', gap: 1.25, gridTemplateColumns: { xs: '1fr', lg: 'repeat(4, 1fr)' } }}>
-            {GUIDE_MODE_OPTIONS.map((item) => {
-              const active = item.mode === trainingMode
-              return (
-                <ButtonBase
-                  key={item.mode}
-                  onClick={() => handleTrainingModeChange(item.mode)}
-                  disabled={pipelineRunning}
-                  sx={{
-                    display: 'block',
-                    textAlign: 'left',
-                    borderRadius: 2,
-                    border: '1px solid',
-                    borderColor: active ? 'primary.main' : 'divider',
-                    bgcolor: active ? 'action.selected' : 'background.default',
-                    p: 1.5,
-                    minHeight: 168,
-                    transition: theme.transitions.create(['background-color', 'border-color', 'transform'], {
-                      duration: theme.transitions.duration.shorter,
-                    }),
-                    '&:hover': {
-                      bgcolor: 'action.hover',
-                      transform: pipelineRunning ? 'none' : 'translateY(-1px)',
-                    },
-                  }}
-                >
-                  <Stack spacing={1} sx={{ height: '100%' }}>
-                    <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
-                      <MsIcon name={item.icon} size={24} fill={active ? 1 : 0} />
-                      <Chip size="small" color={item.mode === 'piper' ? 'success' : active ? 'primary' : 'default'} label={item.tag} />
-                    </Stack>
-                    <Typography variant="subtitle2" fontWeight={700}>
-                      {item.title}
-                    </Typography>
-                    <Typography variant="body2" sx={{ opacity: 0.76 }}>
-                      {item.description}
-                    </Typography>
-                    <Typography variant="caption" sx={{ mt: 'auto', opacity: 0.66 }}>
-                      {item.beginnerNote}
-                    </Typography>
-                  </Stack>
-                </ButtonBase>
-              )
-            })}
-          </Box>
-        </Stack>
-      </Paper>
-
-      <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', xl: 'repeat(2, minmax(0, 1fr))' } }}>
-        <Paper sx={cardPaperSx}>
-          <Stack spacing={1.5}>
-            <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
-              <Box>
-                <Typography variant="subtitle1" fontWeight={700}>
-                  2. 准备依赖
-                </Typography>
-                <Typography variant="body2" sx={{ opacity: 0.72 }}>
-                  训练、识别、蒸馏和导出需要不同运行时。缺什么装什么。
-                </Typography>
-              </Box>
-              <Button
-                size="small"
-                variant="outlined"
-                startIcon={<MsIcon name="build" size={18} />}
-                onClick={() => {
-                  void openGuideDependencyCheck()
-                }}
-                disabled={pipelineRunning || trainingFabBlockedByBackgroundTask}
-              >
-                准备缺失项
-              </Button>
-            </Stack>
-            <Stack spacing={1}>
-              {guideDependencyRows.map((item) => (
-                <Box
-                  key={item.key}
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: '28px minmax(0, 1fr)',
-                    gap: 1,
-                    alignItems: 'flex-start',
-                    py: 0.75,
-                  }}
-                >
-                  <MsIcon name={item.ready ? 'check_circle' : 'radio_button_unchecked'} size={22} fill={item.ready ? 1 : 0} />
-                  <Box sx={{ minWidth: 0 }}>
-                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                      <Typography variant="body2" fontWeight={700}>
-                        {item.label}
-                      </Typography>
-                      <Chip size="small" color={item.ready ? 'success' : 'warning'} label={item.ready ? '已准备' : '需要处理'} />
-                    </Stack>
-                    <Typography variant="caption" sx={{ opacity: 0.68 }}>
-                      {item.detail}
-                    </Typography>
-                  </Box>
-                </Box>
-              ))}
-            </Stack>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-              <Button variant="text" startIcon={<MsIcon name="tune" size={18} />} onClick={() => setPage('settings')}>
-                打开训练设置
-              </Button>
-              <Button
-                variant="text"
-                startIcon={<MsIcon name="memory" size={18} />}
-                onClick={() => handlePiperDeviceChange(device === 'cuda' ? 'cpu' : 'cuda')}
-                disabled={pipelineRunning}
-              >
-                切换为 {device === 'cuda' ? 'CPU 训练' : 'GPU/CUDA 训练'}
-              </Button>
-            </Stack>
-          </Stack>
-        </Paper>
-
-        <Paper sx={cardPaperSx}>
-          <Stack spacing={1.5}>
-            <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
-              <Box>
-                <Typography variant="subtitle1" fontWeight={700}>
-                  3. 准备训练素材
-                </Typography>
-                <Typography variant="body2" sx={{ opacity: 0.72 }}>
-                  当前路线：{guideModeOption.title}
-                </Typography>
-              </Box>
-              <Button size="small" variant="outlined" startIcon={<MsIcon name="folder_open" size={18} />} onClick={() => setPage('prep')}>
-                去准备
-              </Button>
-            </Stack>
-            <Stack spacing={1}>
-              {guideMaterialRows.map((item) => (
-                <Box
-                  key={item.key}
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: '28px minmax(0, 1fr)',
-                    gap: 1,
-                    alignItems: 'flex-start',
-                    py: 0.75,
-                  }}
-                >
-                  <MsIcon name={item.ready ? 'check_circle' : 'radio_button_unchecked'} size={22} fill={item.ready ? 1 : 0} />
-                  <Box sx={{ minWidth: 0 }}>
-                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                      <Typography variant="body2" fontWeight={700}>
-                        {item.label}
-                      </Typography>
-                      <Chip size="small" color={item.ready ? 'success' : 'warning'} label={item.ready ? '已完成' : '待完成'} />
-                    </Stack>
-                    <Typography variant="caption" sx={{ opacity: 0.68 }}>
-                      {item.detail}
-                    </Typography>
-                  </Box>
-                </Box>
-              ))}
-            </Stack>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-              {trainingMode === 'piper' && (
-                <Button variant="text" startIcon={<MsIcon name="add" size={18} />} onClick={pickAudioFiles}>
-                  添加录音
-                </Button>
-              )}
-              {(trainingMode === 'gsv_distill' || trainingMode === 'voxcpm_distill') && (
-                <Button
-                  variant="text"
-                  startIcon={<MsIcon name="library_books" size={18} />}
-                  onClick={() => setDistillPresetDialogOpen(true)}
-                >
-                  添加内置预设文本
-                </Button>
-              )}
-              {trainingMode === 'resume_project' && (
-                <Button variant="text" startIcon={<MsIcon name="folder" size={18} />} onClick={pickResumeProjectDir}>
-                  选择旧项目
-                </Button>
-              )}
-            </Stack>
-          </Stack>
-        </Paper>
-      </Box>
-
-      <Paper sx={cardPaperSx}>
-        <Stack spacing={1.5}>
-          <Typography variant="subtitle1" fontWeight={700}>
-            4. 确认输出和语音包信息
-          </Typography>
-          <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' } }}>
-            {guideOutputRows.map((item) => (
-              <Box
-                key={item.key}
-                sx={{
-                  p: 1.25,
-                  borderRadius: 2,
-                  bgcolor: 'background.default',
-                  minWidth: 0,
-                }}
-              >
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-                  <MsIcon name={item.ready ? 'check_circle' : 'info'} size={20} fill={item.ready ? 1 : 0} />
-                  <Typography variant="body2" fontWeight={700}>
-                    {item.label}
-                  </Typography>
-                </Stack>
-                <Typography variant="caption" sx={{ opacity: 0.68, wordBreak: 'break-all' }}>
-                  {item.detail}
-                </Typography>
-              </Box>
-            ))}
-          </Box>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-            <Button variant="text" startIcon={<MsIcon name="edit" size={18} />} onClick={() => setPage('prep')}>
-              修改项目与语音包信息
-            </Button>
-            <Button variant="text" startIcon={<MsIcon name="settings" size={18} />} onClick={() => setPage('settings')}>
-              调整训练参数
-            </Button>
-          </Stack>
-        </Stack>
-      </Paper>
-
-      <Paper sx={cardPaperSx}>
-        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2} alignItems={{ xs: 'stretch', lg: 'center' }} justifyContent="space-between">
-          <Stack spacing={0.75}>
-            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-              <Typography variant="subtitle1" fontWeight={700}>
-                5. 开始训练
-              </Typography>
-              <Chip size="small" color="primary" label={TRAINING_MODE_LABELS[trainingMode]} />
-              <Chip size="small" label={`Piper ${device === 'cuda' ? 'GPU/CUDA' : 'CPU'}`} />
-            </Stack>
-            <Typography variant="body2" sx={{ opacity: 0.72 }}>
-              点击后会复用正式训练入口：缺依赖会弹出安装引导，旧项目需要重建素材会弹出确认，VoxCPM2 声音设定会先要求确认预览音色。
-            </Typography>
-          </Stack>
-          <Button
-            variant="contained"
-            size="large"
-            startIcon={<MsIcon name={pipelineRunning ? 'stop' : 'play_arrow'} size={20} fill={1} />}
-            onClick={pipelineRunning ? abortPipeline : startPipeline}
-            disabled={trainingFabBlockedByBackgroundTask || previewBusy}
-          >
-            {pipelineRunning ? '停止训练' : '我已准备好，开始训练语音包'}
-          </Button>
-        </Stack>
-      </Paper>
-    </Stack>
+  const guideContent = (
+    <QuickStartPage
+      cardPaperSx={cardPaperSx}
+      resolvedThemeMode={resolvedThemeMode}
+      guideStep={guideStep}
+      guideStepMax={guideStepMax}
+      guideStepProgress={guideStepProgress}
+      guideStepContent={guideStepContent}
+      guideStepLabels={GUIDE_STEP_LABELS}
+      guideNextIsVoxcpmPreview={guideNextIsVoxcpmPreview}
+      trainingMode={trainingMode}
+      trainingModeLabels={TRAINING_MODE_LABELS}
+      guideModeOptions={GUIDE_MODE_OPTIONS}
+      guideModeTitle={guideModeOption.title}
+      guideDependencyRows={guideDependencyRows}
+      guideMaterialRows={guideMaterialRows}
+      guideOutputRows={guideOutputRows}
+      device={device}
+      pipelineRunning={pipelineRunning}
+      trainingFabBlockedByBackgroundTask={trainingFabBlockedByBackgroundTask}
+      previewBusy={previewBusy}
+      voxcpmBootstrapPreviewBusy={voxcpmBootstrapPreviewBusy}
+      onGuideStepChange={setGuideStep}
+      onStartPipeline={startPipeline}
+      onAbortPipeline={abortPipeline}
+      onStartGuideVoxcpmBootstrapPreview={startGuideVoxcpmBootstrapPreview}
+      onOpenGuideDependencyCheck={openGuideDependencyCheck}
+      onPageChange={setPage}
+      onTrainingModeChange={handleTrainingModeChange}
+      onPiperDeviceChange={handlePiperDeviceChange}
+      onPickAudioFiles={pickAudioFiles}
+      onOpenDistillPresetDialog={() => setDistillPresetDialogOpen(true)}
+      onPickResumeProjectDir={pickResumeProjectDir}
+    />
   )
-
   const prepContent = (
     <Stack spacing={2}>
       <Paper sx={cardPaperSx}>
@@ -6819,157 +6202,29 @@ function App() {
       )}
 
       {trainingMode === 'resume_project' ? (
-        <Paper sx={cardPaperSx}>
-          <Stack spacing={1.5}>
-            <Typography variant="subtitle1" fontWeight={600}>
-              旧项目继续训练
-            </Typography>
-            <PathField
-              label="旧训练项目目录"
-              value={resumeProjectDir}
-              onChange={(value) => {
-                setResumeProjectDir(value)
-                setResumeProjectStatus(null)
-              }}
-              onPick={pickResumeProjectDir}
-              onDropPath={(value) => {
-                setResumeProjectDir(value)
-                setResumeProjectStatus(null)
-                void inspectResumeProject(value)
-              }}
-              helperText="选择之前创建的训练项目目录，软件会自动检查可继续使用的素材。"
-              placeholder="选择旧训练项目根目录"
-            />
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-              <Button
-                variant="outlined"
-                startIcon={resumeProjectBusy ? <CircularProgress size={16} color="inherit" /> : <MsIcon name="refresh" size={18} />}
-                onClick={() => {
-                  void inspectResumeProject()
-                }}
-                disabled={resumeProjectBusy || !resumeProjectDir.trim()}
-              >
-                检查项目
-              </Button>
-              <Typography variant="caption" sx={{ alignSelf: 'center', opacity: 0.72 }}>
-                继续训练会优先使用旧项目保存的设置和素材；当前页面的文本来源不会覆盖旧项目。
-              </Typography>
-            </Stack>
-            {resumeProjectStatus && (
-              <Alert severity={resumeProjectStatus.ok ? (resumeProjectStatus.needs_material_rebuild ? 'warning' : 'success') : 'error'}>
-                <Stack spacing={1}>
-                  <Typography variant="body2">{resumeProjectStatus.message}</Typography>
-                  {resumeProjectStatus.material_status && (
-                    <Typography variant="body2" sx={{ opacity: 0.86 }}>
-                      {resumeProjectStatus.material_status}
-                    </Typography>
-                  )}
-                  <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-                    <Chip
-                      size="small"
-                      label={`模式：${TRAINING_MODE_LABELS[String(resumeProjectStatus.mode || '')] || resumeProjectStatus.mode || '未知'}`}
-                    />
-                    <Chip size="small" label={`文本记录：${resumeProjectStatus.metadata_count ?? 0} 条`} />
-                    <Chip size="small" label={`可用音频：${resumeProjectStatus.existing_count ?? 0} 条`} />
-                    <Chip
-                      size="small"
-                      color={resumeProjectStatus.missing_count ? 'warning' : 'default'}
-                      label={`缺失/损坏音频：${resumeProjectStatus.missing_count ?? 0} 条`}
-                    />
-                    <Chip
-                      size="small"
-                      color={resumeProjectStatus.direct_train_ready ? 'success' : 'warning'}
-                      label={resumeProjectStatus.direct_train_ready ? '素材完整：直接训练' : '需要准备素材'}
-                    />
-                    {resumeProjectStatus.input_audio_count !== undefined && resumeProjectStatus.input_audio_count > 0 && (
-                      <Chip
-                        size="small"
-                        color={resumeProjectStatus.input_audio_missing_count ? 'warning' : 'default'}
-                        label={`原始音频：${resumeProjectStatus.input_audio_available_count ?? 0}/${resumeProjectStatus.input_audio_count}`}
-                      />
-                    )}
-                    {resumeProjectStatus.metadata_inconsistent && (
-                      <Chip size="small" color="warning" label="文本记录不一致" />
-                    )}
-                  </Stack>
-                  {resumeProjectStatus.config_summary && (
-                    <Typography variant="caption" sx={{ opacity: 0.78, wordBreak: 'break-all' }}>
-                      配置摘要：{resumeProjectStatus.config_summary}
-                    </Typography>
-                  )}
-                  {resumeProjectStatus.config_path && (
-                    <Typography variant="caption" sx={{ opacity: 0.78, wordBreak: 'break-all' }}>
-                      配置：{resumeProjectStatus.config_path}
-                    </Typography>
-                  )}
-                </Stack>
-              </Alert>
-            )}
-            <Alert severity="info">
-              音频完整时会直接进入 Piper 训练；VoxCPM2 项目缺失或损坏音频会用项目内配置继续生成；GPT-SoVITS 项目缺失或损坏音频但找不到对应模型时，会移除不可用文本后继续训练，若音频完全不可用则无法开始。
-            </Alert>
-          </Stack>
-        </Paper>
+        <ResumeProjectPanel
+          cardPaperSx={cardPaperSx}
+          PathFieldComponent={PathField}
+          resumeProjectDir={resumeProjectDir}
+          resumeProjectBusy={resumeProjectBusy}
+          resumeProjectStatus={resumeProjectStatus}
+          trainingModeLabels={TRAINING_MODE_LABELS}
+          onResumeProjectDirChange={setResumeProjectDir}
+          onResumeProjectStatusClear={() => setResumeProjectStatus(null)}
+          onPickResumeProjectDir={pickResumeProjectDir}
+          onInspectResumeProject={inspectResumeProject}
+        />
       ) : trainingMode === 'piper' ? (
-        <Paper sx={cardPaperSx}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between">
-            <Typography variant="subtitle1" fontWeight={600}>
-              音频导入
-            </Typography>
-            <Stack direction="row" spacing={1}>
-              <Tooltip title="添加音频" arrow>
-                <IconButton size="small" onClick={pickAudioFiles}>
-                  <MsIcon name="add" size={20} />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="清空音频" arrow>
-                <IconButton size="small" onClick={clearAudioFiles}>
-                  <MsIcon name="delete" size={20} />
-                </IconButton>
-              </Tooltip>
-            </Stack>
-          </Stack>
-          <Box
-            sx={{
-              mt: 1,
-              border: '1px dashed',
-              borderColor: audioDragActive ? 'primary.main' : 'transparent',
-              borderRadius: 1,
-              p: 1,
-              transition: 'border-color 0.15s ease',
-            }}
-            onDragOver={(event) => {
-              event.preventDefault()
-              if (event.dataTransfer) {
-                event.dataTransfer.dropEffect = 'copy'
-              }
-              setAudioDragActive(true)
-            }}
-            onDragLeave={() => setAudioDragActive(false)}
-            onDrop={handleAudioDrop}
-          >
-            <List dense sx={{ maxHeight: 240, overflow: 'auto' }}>
-              {audioFiles.length === 0 && (
-                <ListItem>
-                  <ListItemText primary="暂无音频文件" secondary="点击添加或拖拽导入" />
-                </ListItem>
-              )}
-              {audioFiles.map((file, index) => (
-                <ListItem
-                  key={`${file}-${index}`}
-                  divider
-                  secondaryAction={
-                    <IconButton edge="end" size="small" onClick={() => removeAudioFile(index)}>
-                      <MsIcon name="close" size={18} />
-                    </IconButton>
-                  }
-                >
-                  <ListItemText primary={file} />
-                </ListItem>
-              ))}
-            </List>
-          </Box>
-        </Paper>
+        <PiperModePanel
+          cardPaperSx={cardPaperSx}
+          audioFiles={audioFiles}
+          audioDragActive={audioDragActive}
+          onAudioDragActiveChange={setAudioDragActive}
+          onPickAudioFiles={pickAudioFiles}
+          onClearAudioFiles={clearAudioFiles}
+          onAudioDrop={handleAudioDrop}
+          onRemoveAudioFile={removeAudioFile}
+        />
       ) : trainingMode === 'gsv_distill' ? (
         <>
           <Paper sx={cardPaperSx}>
@@ -8139,729 +7394,99 @@ function App() {
   )
 
   const settingsContent = (
-    <Stack spacing={2}>
-      <Paper sx={cardPaperSx}>
-        <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-          训练参数
-        </Typography>
-        <Box
-          sx={{
-            display: 'grid',
-            gap: 2,
-            gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)' },
-          }}
-        >
-          <FormControl fullWidth size="small">
-            <InputLabel>音频等级</InputLabel>
-            <Select value={quality} label="音频等级" onChange={(e) => setQuality(e.target.value as 'A' | 'B')}>
-              <MenuItem value="A">A 档</MenuItem>
-              <MenuItem value="B">B 档(降噪)</MenuItem>
-            </Select>
-          </FormControl>
-          <TextField
-            label="采样率"
-            value={sampleRate}
-            onChange={(e) => setSampleRate(e.target.value)}
-            fullWidth
-            size="small"
-            InputProps={{
-              endAdornment: sampleRate ? (
-                <InputAdornment position="end">
-                  <IconButton size="small" onClick={() => setSampleRate('')}>
-                    <MsIcon name="close" size={18} />
-                  </IconButton>
-                </InputAdornment>
-              ) : undefined,
-            }}
-          />
-          <TextField
-            label="训练批量大小"
-            value={trainBatchSize}
-            onChange={(e) => setTrainBatchSize(e.target.value)}
-            fullWidth
-            size="small"
-            helperText="显存不足时会自动减小这个数并重试"
-            InputProps={{
-              endAdornment: trainBatchSize ? (
-                <InputAdornment position="end">
-                  <IconButton size="small" onClick={() => setTrainBatchSize('')}>
-                    <MsIcon name="close" size={18} />
-                  </IconButton>
-                </InputAdornment>
-              ) : undefined,
-            }}
-          />
-          <Box sx={{ gridColumn: '1 / -1' }}>
-            <Stack spacing={0.5}>
-              <FormControlLabel
-                control={<Switch checked={denoise} onChange={(e) => setDenoise(e.target.checked)} />}
-                label="开启降噪/筛选"
-              />
-              <FormControlLabel
-                control={<Switch checked={trimSilence} onChange={(e) => setTrimSilence(e.target.checked)} />}
-                label="训练时自动裁剪音频首尾空白"
-              />
-              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', pl: 5 }}>
-                默认开启；只会裁剪送入训练的临时音频，不会改动原始录音或蒸馏语料文件。
-              </Typography>
-            </Stack>
-          </Box>
-          <PathField
-            label="语音识别模型包"
-            value={asrModel}
-            onChange={setAsrModel}
-            onPick={pickAsrModel}
-            onDropPath={setAsrModel}
-            onDropFiles={saveDroppedFileSingle}
-          />
-          <PathField
-            label="Piper 基线模型（可选）"
-            value={baseCkpt}
-            onChange={setBaseCkpt}
-            onPick={pickBaseCkpt}
-            onDropPath={setBaseCkpt}
-            onDropFiles={saveDroppedFileSingle}
-          />
-          <FormControlLabel
-            control={<Switch checked={useEspeak} onChange={(e) => setUseEspeak(e.target.checked)} />}
-            label="使用兼容发音模式（espeak-ng）"
-          />
-          <PathField
-            label="Piper 发音配置"
-            value={piperConfig}
-            onChange={setPiperConfig}
-            onPick={pickPiperConfig}
-            onDropPath={setPiperConfig}
-            onDropFiles={saveDroppedFileSingle}
-          />
-          <FormControl fullWidth size="small">
-            <InputLabel>Piper 训练设备</InputLabel>
-            <Select value={device} label="Piper 训练设备" onChange={(e) => handlePiperDeviceChange(e.target.value as 'cpu' | 'cuda')}>
-              <MenuItem value="cpu">CPU</MenuItem>
-              <MenuItem value="cuda">GPU/CUDA</MenuItem>
-            </Select>
-          </FormControl>
-        </Box>
-      </Paper>
-
-      <Paper sx={cardPaperSx}>
-        <Stack spacing={1.5}>
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} alignItems={{ xs: 'flex-start', md: 'center' }} justifyContent="space-between">
-            <Stack spacing={0.25}>
-              <Typography variant="subtitle1" fontWeight={600}>
-                下载源设置
-              </Typography>
-              <Typography variant="body2" sx={{ opacity: 0.72 }}>
-                软件会优先使用你选择的下载源；如果该源暂时不可用，会自动尝试同一组里的其它链接。
-              </Typography>
-            </Stack>
-            <Box sx={runtimeActionRowSx}>
-              <Button
-                variant="outlined"
-                startIcon={<MsIcon name="refresh" size={18} />}
-                onClick={() => {
-                  void refreshDownloadSourceConfig()
-                }}
-                disabled={downloadSourceBusy || pipelineRunning}
-              >
-                刷新配置
-              </Button>
-              <Button
-                variant="contained"
-                startIcon={<MsIcon name="edit" size={18} />}
-                onClick={() => {
-                  void openDownloadSourceDialog()
-                }}
-                disabled={downloadSourceBusy || pipelineRunning}
-              >
-                编辑链接
-              </Button>
-            </Box>
-          </Stack>
-
-          {downloadSourceConfig ? (
-            <Stack spacing={1}>
-              {downloadSourceConfig.groups.map((group) => {
-                const selectableSources = group.sources.length ? group.sources : [{ id: '', label: '未配置', url: '' }]
-                const selected = group.preferred_source_id || downloadSourceConfig.preferred_sources[group.key] || selectableSources[0]?.id || ''
-                const configuredCount = group.sources.filter((source) => source.url.trim()).length
-                return (
-                  <Stack
-                    key={group.key}
-                    direction={{ xs: 'column', md: 'row' }}
-                    spacing={1}
-                    alignItems={{ xs: 'stretch', md: 'center' }}
-                    justifyContent="space-between"
-                    sx={{ py: 0.75 }}
-                  >
-                    <Box sx={{ minWidth: 0 }}>
-                      <Typography variant="body2" fontWeight={600}>
-                        {group.label}
-                      </Typography>
-                      <Typography variant="caption" sx={{ opacity: 0.68 }}>
-                        已填写 {configuredCount}/{group.sources.length} 个源
-                      </Typography>
-                    </Box>
-                    <FormControl size="small" sx={{ minWidth: { xs: '100%', md: 260 } }}>
-                      <InputLabel>优先下载源</InputLabel>
-                      <Select
-                        value={selected}
-                        label="优先下载源"
-                        onChange={(event) => {
-                          void savePreferredDownloadSource(group.key, String(event.target.value))
-                        }}
-                        disabled={downloadSourceBusy || pipelineRunning || !group.sources.length}
-                      >
-                        {selectableSources.map((source) => (
-                          <MenuItem key={source.id || 'empty'} value={source.id}>
-                            {source.label}{source.url.trim() ? '' : '（未填写链接）'}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </Stack>
-                )
-              })}
-              <Typography variant="caption" sx={{ opacity: 0.64 }}>
-                可在“编辑链接”中填写或调整 ModelScope、Hugging Face 等下载地址。
-              </Typography>
-            </Stack>
-          ) : (
-            <Alert severity="info">尚未读取下载源设置。</Alert>
-          )}
-        </Stack>
-      </Paper>
-
-      <Paper sx={cardPaperSx}>
-        <Stack spacing={1.5}>
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} alignItems={{ xs: 'flex-start', md: 'center' }} justifyContent="space-between">
-            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-              <Typography variant="subtitle1" fontWeight={600}>
-                训练资源包
-              </Typography>
-              <Chip
-                size="small"
-                color={getTrainerResourcesChipColor(trainerResourcesStatus)}
-                label={getTrainerResourcesChipLabel(trainerResourcesStatus)}
-              />
-            </Stack>
-            <Box sx={runtimeActionRowSx}>
-              <Button
-                variant="outlined"
-                startIcon={<MsIcon name="refresh" size={18} />}
-                onClick={() => {
-                  void refreshTrainerResourcesStatus()
-                }}
-                disabled={trainerResourcesBusy || pipelineRunning}
-              >
-                刷新状态
-              </Button>
-              <Button
-                variant="contained"
-                startIcon={<MsIcon name={trainerResourcesStatus?.external_available ? 'archive' : 'download'} size={18} />}
-                onClick={() => {
-                  void installTrainerResources(Boolean(trainerResourcesStatus?.external_available))
-                }}
-                disabled={trainerResourcesBusy || pipelineRunning}
-              >
-                {trainerResourcesStatus?.external_available ? '重新解压' : '下载解压'}
-              </Button>
-              <Button
-                variant="outlined"
-                startIcon={<MsIcon name="upload_file" size={18} />}
-                onClick={() => {
-                  void installTrainerResourcesFromLocal()
-                }}
-                disabled={trainerResourcesBusy || pipelineRunning}
-              >
-                本地安装
-              </Button>
-            </Box>
-          </Stack>
-          <Box sx={{ minWidth: 0 }}>
-            <Typography variant="body2" sx={{ opacity: 0.78 }}>
-              首次训练前需要准备训练资源包，里面包含 ASR 模型、Piper 基线、发音字典和 espeak-ng 等必要资源。
-            </Typography>
-            <Typography variant="caption" sx={{ mt: 0.5, display: 'block', opacity: 0.62 }}>
-              可以在线下载，也可以选择你已经下载好的本地 7z 文件安装。
-            </Typography>
-          </Box>
-
-          {(trainerResourcesBusy || trainerResourcesProgressMessage) && (
-            <Stack spacing={0.75}>
-              {trainerResourcesBusy && (
-                <LinearProgress
-                  variant={trainerResourcesProgressValue > 0 ? 'determinate' : 'indeterminate'}
-                  value={Math.min(100, Math.max(0, trainerResourcesProgressValue * 100))}
-                />
-              )}
-              {trainerResourcesBusy && trainerResourcesProgressValue > 0 && (
-                <Typography variant="caption" sx={{ opacity: 0.68 }}>
-                  安装进度：{Math.round(trainerResourcesProgressValue * 100)}%
-                </Typography>
-              )}
-              <Typography variant="caption" sx={{ opacity: 0.78 }}>
-                {trainerResourcesProgressMessage || '正在处理训练资源包...'}
-              </Typography>
-            </Stack>
-          )}
-
-          {trainerResourcesStatus && (
-            <Alert
-              severity={
-                trainerResourcesStatus.status === 'error'
-                  ? 'error'
-                  : trainerResourcesStatus.external_available
-                    ? 'success'
-                    : trainerResourcesStatus.available
-                      ? 'warning'
-                      : 'info'
-              }
-            >
-              <Stack spacing={0.5}>
-                <Typography variant="body2">{trainerResourcesStatus.message}</Typography>
-                <Typography variant="caption" sx={{ opacity: 0.8, wordBreak: 'break-all' }}>
-                  当前资源目录：{trainerResourcesStatus.active_resources_root || '未找到'}
-                </Typography>
-                <Typography variant="caption" sx={{ opacity: 0.8, wordBreak: 'break-all' }}>
-                  外置资源目录：{trainerResourcesStatus.resources_root}
-                </Typography>
-                <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                  ASR 模型：{trainerResourcesStatus.asr_model_count ?? 0} / Piper 基线：{trainerResourcesStatus.piper_checkpoint_count ?? 0}
-                  {trainerResourcesStatus.phonemizer_available ? ' / phonemizer 已就绪' : ' / phonemizer 缺失'}
-                  {trainerResourcesStatus.espeak_available ? ' / espeak-ng 已就绪' : ' / espeak-ng 缺失'}
-                </Typography>
-                {trainerResourcesStatus.source_label && (
-                  <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                    安装来源：{trainerResourcesStatus.source_label}
-                  </Typography>
-                )}
-              </Stack>
-            </Alert>
-          )}
-
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-            <Button
-              variant="outlined"
-              startIcon={<MsIcon name="folder_open" size={18} />}
-              onClick={() => {
-                void openTrainerResourcesDirectory()
-              }}
-              disabled={trainerResourcesBusy || !trainerResourcesStatus}
-            >
-              打开资源目录
-            </Button>
-            <Typography variant="caption" sx={{ alignSelf: 'center', opacity: 0.72 }}>
-              安装完成后会自动刷新默认模型和基线路径。
-            </Typography>
-          </Stack>
-        </Stack>
-      </Paper>
-
-      <Paper sx={cardPaperSx}>
-        <Stack spacing={1.5}>
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} alignItems={{ xs: 'flex-start', md: 'center' }} justifyContent="space-between">
-            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-              <Typography variant="subtitle1" fontWeight={600}>
-                Piper 基础运行时
-              </Typography>
-              <Chip
-                size="small"
-                color={getPiperRuntimeChipColor(piperRuntimeStatus)}
-                label={getPiperRuntimeChipLabel(piperRuntimeStatus)}
-              />
-            </Stack>
-            <Box sx={runtimeActionRowSx}>
-              <Button
-                variant="outlined"
-                startIcon={<MsIcon name="refresh" size={18} />}
-                onClick={() => {
-                  void refreshPiperRuntimeStatus()
-                }}
-                disabled={piperRuntimeBusy || pipelineRunning}
-              >
-                刷新状态
-              </Button>
-              <Button
-                variant="contained"
-                startIcon={<MsIcon name={piperRuntimeStatus?.available ? 'archive' : 'download'} size={18} />}
-                onClick={() => {
-                  void installPiperRuntime(Boolean(piperRuntimeStatus?.available))
-                }}
-                disabled={piperRuntimeBusy || pipelineRunning}
-              >
-                {piperRuntimeStatus?.available ? '重新解压' : '下载解压'}
-              </Button>
-              <Button
-                variant="outlined"
-                startIcon={<MsIcon name="upload_file" size={18} />}
-                onClick={() => {
-                  void installPiperRuntimeFromLocal()
-                }}
-                disabled={piperRuntimeBusy || pipelineRunning}
-              >
-                本地安装
-              </Button>
-            </Box>
-          </Stack>
-          <Box sx={{ minWidth: 0 }}>
-            <Typography variant="body2" sx={{ opacity: 0.78 }}>
-              Piper 基础运行时用于 CPU 训练、预处理和导出。首次使用前需要先安装。
-            </Typography>
-            <Typography variant="caption" sx={{ mt: 0.5, display: 'block', opacity: 0.62 }}>
-              可以在线下载，也可以选择你已经下载好的本地 7z 文件安装。
-            </Typography>
-          </Box>
-
-          {(piperRuntimeBusy || piperRuntimeProgressMessage) && (
-            <Stack spacing={0.75}>
-              {piperRuntimeBusy && (
-                <LinearProgress
-                  variant={piperRuntimeProgressValue > 0 ? 'determinate' : 'indeterminate'}
-                  value={Math.min(100, Math.max(0, piperRuntimeProgressValue * 100))}
-                />
-              )}
-              {piperRuntimeBusy && piperRuntimeProgressValue > 0 && (
-                <Typography variant="caption" sx={{ opacity: 0.68 }}>
-                  安装进度：{Math.round(piperRuntimeProgressValue * 100)}%
-                </Typography>
-              )}
-              <Typography variant="caption" sx={{ opacity: 0.78 }}>
-                {piperRuntimeProgressMessage || '正在处理 Piper 基础运行时...'}
-              </Typography>
-            </Stack>
-          )}
-
-          {piperRuntimeStatus && (
-            <Alert severity={piperRuntimeStatus.status === 'error' ? 'error' : piperRuntimeStatus.available ? 'success' : 'warning'}>
-              <Stack spacing={0.5}>
-                <Typography variant="body2">{piperRuntimeStatus.message}</Typography>
-                <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                  运行时目录：{piperRuntimeStatus.env_path}
-                </Typography>
-                {piperRuntimeStatus.torch_version && (
-                  <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                    Torch：{piperRuntimeStatus.torch_version}
-                    {piperRuntimeStatus.pytorch_lightning_version ? ` / Lightning ${piperRuntimeStatus.pytorch_lightning_version}` : ''}
-                  </Typography>
-                )}
-                {piperRuntimeStatus.source_label && (
-                  <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                    安装来源：{piperRuntimeStatus.source_label}
-                  </Typography>
-                )}
-              </Stack>
-            </Alert>
-          )}
-
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-            <Button
-              variant="outlined"
-              startIcon={<MsIcon name="folder_open" size={18} />}
-              onClick={() => {
-                void openPiperRuntimeDirectory()
-              }}
-              disabled={piperRuntimeBusy || !piperRuntimeStatus}
-            >
-              打开运行时目录
-            </Button>
-            <Typography variant="caption" sx={{ alignSelf: 'center', opacity: 0.72 }}>
-              CPU 训练和通用 Piper 流程会使用这个基础运行时。
-            </Typography>
-          </Stack>
-        </Stack>
-      </Paper>
-
-      <Paper sx={cardPaperSx}>
-        <Stack spacing={1.5}>
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} alignItems={{ xs: 'flex-start', md: 'center' }} justifyContent="space-between">
-            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-              <Typography variant="subtitle1" fontWeight={600}>
-                Piper CUDA 运行时
-              </Typography>
-              <Chip
-                size="small"
-                color={getCudaRuntimeChipColor(cudaRuntimeStatus)}
-                label={getCudaRuntimeChipLabel(cudaRuntimeStatus)}
-              />
-            </Stack>
-            <Box sx={runtimeActionRowSx}>
-              <Button
-                variant="outlined"
-                startIcon={<MsIcon name="refresh" size={18} />}
-                onClick={() => {
-                  void refreshCudaRuntimeStatus()
-                }}
-                disabled={cudaRuntimeBusy || pipelineRunning}
-              >
-                刷新状态
-              </Button>
-              <Button
-                variant="contained"
-                startIcon={<MsIcon name={cudaRuntimeStatus?.available ? 'build' : 'download'} size={18} />}
-                onClick={() => {
-                  void installCudaRuntime(Boolean(cudaRuntimeStatus?.available))
-                }}
-                disabled={cudaRuntimeBusy || pipelineRunning}
-              >
-                {cudaRuntimeStatus?.available ? '重新解压' : '安装运行时'}
-              </Button>
-              <Button
-                variant="outlined"
-                startIcon={<MsIcon name="upload_file" size={18} />}
-                onClick={() => {
-                  void installCudaRuntimeFromLocal()
-                }}
-                disabled={cudaRuntimeBusy || pipelineRunning}
-              >
-                本地安装
-              </Button>
-            </Box>
-          </Stack>
-          <Box sx={{ minWidth: 0 }}>
-            <Typography variant="body2" sx={{ opacity: 0.78 }}>
-                  Piper CUDA 运行时用于显卡训练。首次使用 GPU/CUDA 训练前需要先安装。
-                </Typography>
-                <Typography variant="caption" sx={{ mt: 0.5, display: 'block', opacity: 0.62 }}>
-                  软件会自动选择可用下载源；也可以选择你已经下载好的本地 7z 文件安装。
-                </Typography>
-          </Box>
-
-          {(cudaRuntimeBusy || cudaRuntimeProgressMessage) && (
-            <Stack spacing={0.75}>
-              {cudaRuntimeBusy && (
-                <LinearProgress
-                  variant={cudaRuntimeProgressValue > 0 ? 'determinate' : 'indeterminate'}
-                  value={Math.min(100, Math.max(0, cudaRuntimeProgressValue * 100))}
-                />
-              )}
-              {cudaRuntimeBusy && cudaRuntimeProgressValue > 0 && (
-                <Typography variant="caption" sx={{ opacity: 0.68 }}>
-                  安装进度：{Math.round(cudaRuntimeProgressValue * 100)}%
-                </Typography>
-              )}
-              <Typography variant="caption" sx={{ opacity: 0.78 }}>
-                {cudaRuntimeProgressMessage || '正在处理 Piper CUDA 运行时...'}
-              </Typography>
-            </Stack>
-          )}
-
-          {cudaRuntimeStatus && (
-            <Alert severity={cudaRuntimeStatus.status === 'error' ? 'error' : cudaRuntimeStatus.cuda_available === false ? 'warning' : cudaRuntimeStatus.available ? 'success' : 'info'}>
-              <Stack spacing={0.5}>
-                <Typography variant="body2">{cudaRuntimeStatus.message}</Typography>
-                <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                  运行时目录：{cudaRuntimeStatus.env_path}
-                </Typography>
-                {cudaRuntimeStatus.driver_version && (
-                  <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                    NVIDIA 驱动：{cudaRuntimeStatus.driver_version}
-                    {cudaRuntimeStatus.gpu_name ? ` / ${cudaRuntimeStatus.gpu_name}` : ''}
-                    {cudaRuntimeStatus.gpu_memory ? ` / ${cudaRuntimeStatus.gpu_memory}` : ''}
-                  </Typography>
-                )}
-                {cudaRuntimeStatus.torch_version && (
-                  <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                    Torch：{cudaRuntimeStatus.torch_version}
-                    {cudaRuntimeStatus.torch_cuda_version ? ` / CUDA Runtime ${cudaRuntimeStatus.torch_cuda_version}` : ''}
-                  </Typography>
-                )}
-                {formatRuntimeSources(cudaRuntimeStatus) && (
-                  <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                    安装来源：{formatRuntimeSources(cudaRuntimeStatus)}
-                  </Typography>
-                )}
-              </Stack>
-            </Alert>
-          )}
-
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-            <Button
-              variant="outlined"
-              startIcon={<MsIcon name="folder_open" size={18} />}
-              onClick={() => {
-                void openCudaRuntimeDirectory()
-              }}
-              disabled={cudaRuntimeBusy || !cudaRuntimeStatus}
-            >
-              打开运行时目录
-            </Button>
-            <Typography variant="caption" sx={{ alignSelf: 'center', opacity: 0.72 }}>
-              建议仅在 NVIDIA 驱动正常、系统已能识别 GPU 的机器上安装。
-            </Typography>
-          </Stack>
-        </Stack>
-      </Paper>
-
-      <Paper sx={cardPaperSx}>
-        <Stack spacing={1}>
-          <Typography variant="subtitle1" fontWeight={600}>
-            进度
-          </Typography>
-          {activeProgressStages.map((stage) => (
-            <Box key={stage}>
-              <Stack direction="row" justifyContent="space-between">
-                <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                  {STAGE_LABEL[stage]}
-                </Typography>
-                <Typography variant="caption">{Math.round((progress[stage] ?? 0) * 100)}%</Typography>
-              </Stack>
-              <LinearProgress variant="determinate" value={(progress[stage] ?? 0) * 100} sx={{ height: 8, borderRadius: 6 }} />
-            </Box>
-          ))}
-        </Stack>
-      </Paper>
-
-      <Paper sx={cardPaperSx}>
-        <Stack spacing={1}>
-          <Typography variant="subtitle1" fontWeight={600}>
-            系统
-          </Typography>
-          <Stack
-            direction={{ xs: 'column', sm: 'row' }}
-            spacing={1}
-            alignItems={{ sm: 'center' }}
-            sx={{ width: '100%' }}
-          >
-            <FormControl size="small" sx={{ width: { xs: '100%', sm: 220 } }}>
-              <InputLabel>主题模式</InputLabel>
-              <Select
-                value={themeMode}
-                label="主题模式"
-                onChange={(e) => setThemeMode(e.target.value as 'system' | 'light' | 'dark')}
-              >
-                <MenuItem value="system">跟随系统</MenuItem>
-                <MenuItem value="dark">暗色</MenuItem>
-                <MenuItem value="light">明亮</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={contextMenuMode === 'custom'}
-                  onChange={(e) => setContextMenuMode(e.target.checked ? 'custom' : 'native')}
-                />
-              }
-              label="自绘右键菜单"
-            />
-            <Box sx={{ flexGrow: 1, display: { xs: 'none', sm: 'block' } }} />
-            <Stack
-              direction="row"
-              spacing={1}
-              sx={{
-                width: { xs: '100%', sm: 'auto' },
-                justifyContent: 'flex-end',
-              }}
-            >
-                <Button
-                  variant="contained"
-                  color="primary"
-                  startIcon={<MsIcon name="restart_alt" size={18} />}
-                  onClick={requestBackendRestart}
-                >
-                重启后台服务
-              </Button>
-            </Stack>
-          </Stack>
-        </Stack>
-      </Paper>
-    </Stack>
+    <SettingsPage
+      cardPaperSx={cardPaperSx}
+      runtimeActionRowSx={runtimeActionRowSx}
+      PathFieldComponent={PathField}
+      quality={quality}
+      sampleRate={sampleRate}
+      trainBatchSize={trainBatchSize}
+      denoise={denoise}
+      trimSilence={trimSilence}
+      asrModel={asrModel}
+      baseCkpt={baseCkpt}
+      useEspeak={useEspeak}
+      piperConfig={piperConfig}
+      device={device}
+      downloadSourceConfig={downloadSourceConfig}
+      downloadSourceBusy={downloadSourceBusy}
+      pipelineRunning={pipelineRunning}
+      trainerResourcesStatus={trainerResourcesStatus}
+      trainerResourcesBusy={trainerResourcesBusy}
+      trainerResourcesProgressMessage={trainerResourcesProgressMessage}
+      trainerResourcesProgressValue={trainerResourcesProgressValue}
+      piperRuntimeStatus={piperRuntimeStatus}
+      piperRuntimeBusy={piperRuntimeBusy}
+      piperRuntimeProgressMessage={piperRuntimeProgressMessage}
+      piperRuntimeProgressValue={piperRuntimeProgressValue}
+      cudaRuntimeStatus={cudaRuntimeStatus}
+      cudaRuntimeBusy={cudaRuntimeBusy}
+      cudaRuntimeProgressMessage={cudaRuntimeProgressMessage}
+      cudaRuntimeProgressValue={cudaRuntimeProgressValue}
+      activeProgressStages={activeProgressStages}
+      progress={progress}
+      stageLabels={STAGE_LABEL}
+      themeMode={themeMode}
+      contextMenuMode={contextMenuMode}
+      onQualityChange={setQuality}
+      onSampleRateChange={setSampleRate}
+      onTrainBatchSizeChange={setTrainBatchSize}
+      onDenoiseChange={setDenoise}
+      onTrimSilenceChange={setTrimSilence}
+      onAsrModelChange={setAsrModel}
+      onBaseCkptChange={setBaseCkpt}
+      onUseEspeakChange={setUseEspeak}
+      onPiperConfigChange={setPiperConfig}
+      onPiperDeviceChange={handlePiperDeviceChange}
+      onPickAsrModel={pickAsrModel}
+      onPickBaseCkpt={pickBaseCkpt}
+      onPickPiperConfig={pickPiperConfig}
+      onDropFiles={saveDroppedFileSingle}
+      onRefreshDownloadSourceConfig={refreshDownloadSourceConfig}
+      onOpenDownloadSourceDialog={openDownloadSourceDialog}
+      onSavePreferredDownloadSource={savePreferredDownloadSource}
+      onRefreshTrainerResourcesStatus={refreshTrainerResourcesStatus}
+      onInstallTrainerResources={installTrainerResources}
+      onInstallTrainerResourcesFromLocal={installTrainerResourcesFromLocal}
+      onOpenTrainerResourcesDirectory={openTrainerResourcesDirectory}
+      onRefreshPiperRuntimeStatus={refreshPiperRuntimeStatus}
+      onInstallPiperRuntime={installPiperRuntime}
+      onInstallPiperRuntimeFromLocal={installPiperRuntimeFromLocal}
+      onOpenPiperRuntimeDirectory={openPiperRuntimeDirectory}
+      onRefreshCudaRuntimeStatus={refreshCudaRuntimeStatus}
+      onInstallCudaRuntime={installCudaRuntime}
+      onInstallCudaRuntimeFromLocal={installCudaRuntimeFromLocal}
+      onOpenCudaRuntimeDirectory={openCudaRuntimeDirectory}
+      onThemeModeChange={setThemeMode}
+      onContextMenuModeChange={setContextMenuMode}
+      onRequestBackendRestart={requestBackendRestart}
+    />
   )
-
   const previewContent = (
-    <Stack spacing={2}>
-      <Paper sx={cardPaperSx}>
-        <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-          语音包试听
-        </Typography>
-        <Stack spacing={2}>
-          <PathField
-            label="语音包文件或目录"
-            value={previewVoicepack}
-            onChange={setPreviewVoicepack}
-            onPick={pickPreviewVoicepack}
-            onDropPath={setPreviewVoicepack}
-            onDropFiles={saveDroppedFileSingle}
-          />
-          <TextField
-            label="试听文本"
-            value={previewText}
-            onChange={(e) => setPreviewText(e.target.value)}
-            multiline
-            minRows={3}
-            fullWidth
-          />
-          <Stack direction="row" spacing={1}>
-            <Button
-              variant="contained"
-              startIcon={<MsIcon name="play_arrow" size={18} />}
-              onClick={startPreview}
-              disabled={previewBusy || pipelineRunning}
-            >
-              {previewBusy ? '生成中...' : '生成试听'}
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<MsIcon name="download" size={18} />}
-              onClick={exportPreviewAudio}
-              disabled={!previewAudioPath}
-            >
-              导出音频
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<MsIcon name="folder_open" size={18} />}
-              onClick={openCurrentVoicepackDirectory}
-              disabled={!previewVoicepack.trim()}
-            >
-              打开当前语音包目录
-            </Button>
-          </Stack>
-          {previewBusy && <LinearProgress />}
-        </Stack>
-      </Paper>
-
-      <Paper sx={cardPaperSx}>
-        <Typography variant="subtitle1" fontWeight={600}>
-          播放器
-        </Typography>
-        <Stack spacing={1} sx={{ mt: 1 }}>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Tooltip title={previewPlaying ? '暂停' : '播放'} arrow>
-              <span>
-                <IconButton color="primary" onClick={togglePreviewPlay} disabled={!hasPreviewAudio}>
-                  <MsIcon name={previewPlaying ? 'pause' : 'play_arrow'} size={20} fill={1} />
-                </IconButton>
-              </span>
-            </Tooltip>
-            <Tooltip title="停止" arrow>
-              <span>
-                <IconButton onClick={stopPreviewPlay} disabled={!hasPreviewAudio}>
-                  <MsIcon name="stop" size={20} fill={1} />
-                </IconButton>
-              </span>
-            </Tooltip>
-            <Box sx={{ flex: 1, px: 1 }}>
-              <Slider
-                size="small"
-                min={0}
-                max={previewDuration > 0 ? previewDuration : 1}
-                step={0.01}
-                value={hasPreviewAudio ? Math.min(previewCurrentTime, previewDuration || 1) : 0}
-                onChange={seekPreviewPlay}
-                disabled={!hasPreviewAudio}
-              />
-            </Box>
-            <Typography variant="caption" sx={{ minWidth: 96, textAlign: 'right', opacity: 0.75 }}>
-              {formatTime(previewCurrentTime)} / {formatTime(previewDuration)}
-            </Typography>
-          </Stack>
-          <Typography variant="caption" sx={{ opacity: 0.75, wordBreak: 'break-all' }}>
-            {previewAudioPath || '暂无试听音频'}
-          </Typography>
-        </Stack>
-      </Paper>
-    </Stack>
+    <VoicePreviewPage
+      cardPaperSx={cardPaperSx}
+      PathFieldComponent={PathField}
+      previewVoicepack={previewVoicepack}
+      previewText={previewText}
+      previewBusy={previewBusy}
+      pipelineRunning={pipelineRunning}
+      previewAudioPath={previewAudioPath}
+      hasPreviewAudio={hasPreviewAudio}
+      previewPlaying={previewPlaying}
+      previewCurrentTime={previewCurrentTime}
+      previewDuration={previewDuration}
+      onPreviewVoicepackChange={setPreviewVoicepack}
+      onPreviewTextChange={setPreviewText}
+      onPickPreviewVoicepack={pickPreviewVoicepack}
+      onDropFiles={saveDroppedFileSingle}
+      onStartPreview={startPreview}
+      onExportPreviewAudio={exportPreviewAudio}
+      onOpenCurrentVoicepackDirectory={openCurrentVoicepackDirectory}
+      onTogglePreviewPlay={togglePreviewPlay}
+      onStopPreviewPlay={stopPreviewPlay}
+      onSeekPreviewPlay={seekPreviewPlay}
+      formatTime={formatTime}
+    />
   )
 
   const soundboardContent = (
@@ -9062,52 +7687,6 @@ function App() {
                   删除
                 </Button>
               </Stack>
-            </Stack>
-          </Paper>
-
-          <Paper sx={cardPaperSx}>
-            <Stack spacing={1.5}>
-              <Typography variant="subtitle1" fontWeight={600}>
-                手机端布局默认值
-              </Typography>
-              <FormControl size="small" fullWidth>
-                <InputLabel>竖屏布局</InputLabel>
-                <Select
-                  value={soundboardConfig.portraitLayout}
-                  label="竖屏布局"
-                  onChange={(event) =>
-                    updateSoundboardConfig((prev) => ({
-                      ...prev,
-                      portraitLayout: event.target.value as SoundboardLayoutValue,
-                    }))
-                  }
-                >
-                  {SOUNDBOARD_LAYOUT_OPTIONS.filter((item) => !['grid_7', 'grid_8'].includes(item.value)).map((item) => (
-                    <MenuItem key={item.value} value={item.value}>
-                      {item.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <FormControl size="small" fullWidth>
-                <InputLabel>横屏布局</InputLabel>
-                <Select
-                  value={soundboardConfig.landscapeLayout}
-                  label="横屏布局"
-                  onChange={(event) =>
-                    updateSoundboardConfig((prev) => ({
-                      ...prev,
-                      landscapeLayout: event.target.value as SoundboardLayoutValue,
-                    }))
-                  }
-                >
-                  {SOUNDBOARD_LAYOUT_OPTIONS.map((item) => (
-                    <MenuItem key={item.value} value={item.value}>
-                      {item.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
               <Button variant="text" color="inherit" startIcon={<MsIcon name="restart_alt" size={17} />} onClick={resetSoundboardEditor}>
                 新建空白音效包
               </Button>
@@ -9432,229 +8011,17 @@ function App() {
   )
 
   const logsContent = (
-    <Paper sx={{ ...cardPaperSx, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between">
-        <Typography variant="subtitle1" fontWeight={600}>
-          日志
-        </Typography>
-        <Stack direction="row" alignItems="center" spacing={0.5}>
-          <Chip
-            label={connected ? '后台服务已连接' : '后台服务未连接'}
-            color={connected ? 'success' : 'default'}
-            variant="outlined"
-            size="small"
-          />
-          <Tooltip title="导出日志" arrow>
-            <IconButton size="small" onClick={exportLogs}>
-              <MsIcon name="download" size={18} />
-            </IconButton>
-          </Tooltip>
-        </Stack>
-      </Stack>
-      <Box
-        className="allow-text-select"
-        sx={{
-          mt: 1,
-          flex: 1,
-          minHeight: 0,
-          overflow: 'auto',
-          fontFamily: 'Menlo, Consolas, monospace',
-          fontSize: 12,
-          whiteSpace: 'pre-wrap',
-        }}
-      >
-        {logs.length === 0 ? (
-          <Typography variant="caption" sx={{ opacity: 0.6 }}>
-            暂无日志
-          </Typography>
-        ) : (
-          logs.map((line, idx) => (
-            <Box key={`${idx}-${line}`}>{line}</Box>
-          ))
-        )}
-      </Box>
-    </Paper>
+    <LogsPage cardPaperSx={cardPaperSx} connected={connected} logs={logs} onExportLogs={exportLogs} />
   )
 
   const aboutContent = (
-    <Stack spacing={2}>
-      <Paper
-        sx={{
-          ...cardPaperSx,
-          p: { xs: 3, md: 4 },
-          background:
-            resolvedThemeMode === 'dark'
-              ? 'linear-gradient(135deg, rgba(3,131,135,0.18), rgba(11,15,20,0.92))'
-              : 'linear-gradient(135deg, rgba(3,131,135,0.12), rgba(255,255,255,0.98))',
-        }}
-      >
-        <Stack spacing={2} alignItems="center" textAlign="center">
-          <Box
-            component="span"
-            role="img"
-            aria-label="KIGTTS"
-            sx={{
-              position: 'relative',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: { xs: 48, md: 62 },
-              width: { xs: 220, md: 280 },
-              maxWidth: '100%',
-            }}
-          >
-            <Box
-              component="img"
-              src={logoBlack}
-              alt=""
-              aria-hidden
-              sx={{
-                position: 'absolute',
-                inset: 0,
-                width: '100%',
-                height: '100%',
-                objectFit: 'contain',
-                opacity: resolvedThemeMode === 'dark' ? 0 : 1,
-                filter: resolvedThemeMode === 'dark' ? 'blur(1px)' : 'blur(0px)',
-                transition: 'opacity 220ms ease, filter 220ms ease',
-              }}
-            />
-            <Box
-              component="img"
-              src={logoWhite}
-              alt=""
-              aria-hidden
-              sx={{
-                position: 'absolute',
-                inset: 0,
-                width: '100%',
-                height: '100%',
-                objectFit: 'contain',
-                opacity: resolvedThemeMode === 'dark' ? 1 : 0,
-                filter: resolvedThemeMode === 'dark' ? 'blur(0px)' : 'blur(1px)',
-                transition: 'opacity 220ms ease, filter 220ms ease',
-              }}
-            />
-          </Box>
-          <Typography variant="body2" sx={{ opacity: 0.72, letterSpacing: 0.5 }}>
-            Version {APP_VERSION}
-          </Typography>
-        </Stack>
-      </Paper>
-
-      <Paper sx={cardPaperSx}>
-        <Stack spacing={1.5}>
-          <Typography variant="subtitle1" fontWeight={600}>
-            软件制作
-          </Typography>
-          <Box
-            sx={{
-              display: 'grid',
-              gap: 1.5,
-              gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' },
-            }}
-          >
-            {ABOUT_CREATORS.map((creator) => (
-              <Box
-                key={creator.name}
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1.5,
-                  minWidth: 0,
-                  py: 0.5,
-                }}
-              >
-                <Avatar src={creator.avatar} alt={creator.name} sx={{ width: 64, height: 64 }} />
-                <Stack spacing={0.35} sx={{ minWidth: 0, flex: 1 }}>
-                  <Typography variant="body1" fontWeight={600} noWrap>
-                    {creator.name}
-                  </Typography>
-                  <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
-                    <Link
-                      href={creator.homepage}
-                      underline="none"
-                      color="primary"
-                      sx={{
-                        flex: 1,
-                        minWidth: 0,
-                        px: 0.5,
-                        py: 0.2,
-                        borderRadius: 1,
-                        fontSize: 12,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        transition: 'background-color 120ms ease',
-                        '&:hover': {
-                          bgcolor: 'action.hover',
-                          textDecoration: 'none',
-                        },
-                      }}
-                      onClick={(event) => {
-                        event.preventDefault()
-                        void openExternalLink(creator.homepage, `${creator.name} 主页`)
-                      }}
-                    >
-                      {creator.homepage}
-                    </Link>
-                    <Tooltip title={`打开 ${creator.name} 主页`} arrow>
-                      <IconButton
-                        size="small"
-                        sx={{ flexShrink: 0 }}
-                        onClick={() => {
-                          void openExternalLink(creator.homepage, `${creator.name} 主页`)
-                        }}
-                      >
-                        <MsIcon name="open_in_new" size={18} />
-                      </IconButton>
-                    </Tooltip>
-                  </Stack>
-                </Stack>
-              </Box>
-            ))}
-          </Box>
-        </Stack>
-      </Paper>
-
-      <Paper sx={cardPaperSx}>
-        <Stack spacing={1.5}>
-          <Typography variant="subtitle1" fontWeight={600}>
-            关于
-          </Typography>
-          <Stack spacing={0.25} alignItems="flex-start">
-            <Button
-              variant="text"
-              sx={{
-                px: 0.5,
-                py: 0.25,
-                minWidth: 0,
-                justifyContent: 'flex-start',
-                borderRadius: 1,
-                '&:hover': { bgcolor: 'action.hover' },
-              }}
-              onClick={() => setAboutDialog('openSource')}
-            >
-              开源许可证
-            </Button>
-            <Button
-              variant="text"
-              sx={{
-                px: 0.5,
-                py: 0.25,
-                minWidth: 0,
-                justifyContent: 'flex-start',
-                borderRadius: 1,
-                '&:hover': { bgcolor: 'action.hover' },
-              }}
-              onClick={() => setAboutDialog('privacy')}
-            >
-              隐私政策
-            </Button>
-          </Stack>
-        </Stack>
-      </Paper>
-    </Stack>
+    <AboutPage
+      appVersion={APP_VERSION}
+      cardPaperSx={cardPaperSx}
+      resolvedThemeMode={resolvedThemeMode}
+      onOpenExternal={openExternalLink}
+      onOpenLegal={setAboutDialog}
+    />
   )
 
   const renderContent = (currentPage: AppPage) => {
