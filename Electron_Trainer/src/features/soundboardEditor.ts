@@ -88,6 +88,16 @@ export const normalizeSoundboardEditorConfig = (input: unknown): SoundboardEdito
   if (!input || typeof input !== 'object') return fallback
   const root = input as Partial<SoundboardEditorConfig>
   const groupsRaw = Array.isArray(root.groups) ? root.groups : []
+  const usedGroupIds = new Set<number>()
+  const usedItemIds = new Set<number>()
+  const nextUniqueId = (rawId: unknown, fallbackId: number, usedIds: Set<number>) => {
+    let id = Number(rawId) || fallbackId
+    while (usedIds.has(id)) {
+      id += 1
+    }
+    usedIds.add(id)
+    return id
+  }
   const groups = groupsRaw
     .map((groupRaw, groupIndex) => {
       const group = groupRaw as Partial<SoundboardEditorGroup>
@@ -96,7 +106,7 @@ export const normalizeSoundboardEditorConfig = (input: unknown): SoundboardEdito
         const item = itemRaw as Partial<SoundboardEditorItem>
         const duration = Number(item.durationMs) || 0
         return {
-          id: Number(item.id) || createSoundboardId() + itemIndex,
+          id: nextUniqueId(item.id, createSoundboardId() + itemIndex, usedItemIds),
           title: String(item.title || '').trim() || '新音效',
           wakeWord: String(item.wakeWord || '').trim(),
           audioPath: String(item.audioPath || '').trim(),
@@ -106,7 +116,7 @@ export const normalizeSoundboardEditorConfig = (input: unknown): SoundboardEdito
         }
       })
       return {
-        id: Number(group.id) || groupIndex + 1,
+        id: nextUniqueId(group.id, groupIndex + 1, usedGroupIds),
         title: String(group.title || '').trim() || '未命名分组',
         icon: String(group.icon || '').trim() || 'music_note',
         keywordWakeEnabled: group.keywordWakeEnabled !== false,

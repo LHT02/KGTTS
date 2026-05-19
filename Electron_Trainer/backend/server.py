@@ -23,19 +23,19 @@ from engine.project_state import (  # type: ignore
     training_options_from_dict,
     voxcpm_options_from_dict,
 )
-from engine.runtime_manager import (  # type: ignore
-    describe_piper_runtime,
-    describe_piper_cuda_runtime,
-    describe_download_sources,
-    describe_trainer_resources,
-    describe_voxcpm_models,
-    describe_voxcpm_runtime,
-    download_voxcpm_models,
-    install_piper_runtime,
+from engine.download_sources import describe_download_sources, save_download_sources  # type: ignore
+from engine.model_manager import describe_voxcpm_models, download_voxcpm_models  # type: ignore
+from engine.runtime_install import (  # type: ignore
     install_piper_cuda_runtime,
+    install_piper_runtime,
     install_trainer_resources,
     install_voxcpm_runtime,
-    save_download_sources,
+)
+from engine.runtime_status import (  # type: ignore
+    describe_piper_cuda_runtime,
+    describe_piper_runtime,
+    describe_trainer_resources,
+    describe_voxcpm_runtime,
 )
 from engine.resource_paths import resolve_resources_root  # type: ignore
 

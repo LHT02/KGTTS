@@ -65,6 +65,7 @@ import avatarLht from '../../ARTS/Avatar/LHT.jpg'
 import avatarYuiLu from '../../ARTS/Avatar/YuiLu.jpg'
 import openSourceLicensesText from './legal/open_source_licenses.md?raw'
 import privacyPolicyText from './legal/privacy_policy.md?raw'
+import { MsIcon } from './components/MsIcon'
 import {
   SOUNDBOARD_AUDIO_EXTENSIONS,
   SOUNDBOARD_EDITOR_STORAGE_KEY,
@@ -419,39 +420,6 @@ const DISTILL_TEXT_PRESET_OPTIONS: DistillTextPresetOption[] = [
     loadContent: async () => (await import('../../SampleText/15万字文本库.txt?raw')).default,
   },
 ]
-
-const MsIcon = ({
-  name,
-  size = 20,
-  fill = 0,
-  wght = 500,
-  grad = 0,
-  opsz = 24,
-}: {
-  name: string
-  size?: number
-  fill?: 0 | 1
-  wght?: number
-  grad?: number
-  opsz?: number
-}) => (
-  <Box
-    component="span"
-    className="material-symbols-sharp"
-    sx={{
-      fontSize: size,
-      lineHeight: 1,
-      display: 'inline-flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      userSelect: 'none',
-      fontVariationSettings: `'FILL' ${fill}, 'wght' ${wght}, 'GRAD' ${grad}, 'opsz' ${opsz}`,
-    }}
-    aria-hidden
-  >
-    {name}
-  </Box>
-)
 
 const NumberField = ({
   label,
