@@ -63,7 +63,9 @@ import openSourceLicensesText from './legal/open_source_licenses.md?raw'
 import privacyPolicyText from './legal/privacy_policy.md?raw'
 import { MsIcon } from './components/MsIcon'
 import { PiperModePanel } from './components/training/PiperModePanel'
+import { ProjectOutputCard } from './components/training/ProjectOutputCard'
 import { ResumeProjectPanel } from './components/training/ResumeProjectPanel'
+import { TrainingModeCard } from './components/training/TrainingModeCard'
 import { AboutPage } from './pages/AboutPage'
 import { LogsPage } from './pages/LogsPage'
 import { QuickStartPage } from './pages/QuickStartPage'
@@ -6123,82 +6125,24 @@ function App() {
   )
   const prepContent = (
     <Stack spacing={2}>
-      <Paper sx={cardPaperSx}>
-        <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-          训练模式
-        </Typography>
-        <Stack
-          direction={{ xs: 'column', md: 'row' }}
-          spacing={2}
-          alignItems={{ xs: 'stretch', md: 'center' }}
-          justifyContent="space-between"
-        >
-          <FormControl size="small" sx={{ minWidth: { xs: '100%', md: 280 } }}>
-            <InputLabel>模式</InputLabel>
-            <Select
-              value={trainingMode}
-              label="模式"
-              onChange={(event) => handleTrainingModeChange(event.target.value as TrainingMode)}
-              disabled={pipelineRunning}
-            >
-              <MenuItem value="piper">Piper 标准</MenuItem>
-              <MenuItem value="gsv_distill">GPT-SoVITS 蒸馏</MenuItem>
-              <MenuItem value="voxcpm_distill">VoxCPM2 蒸馏</MenuItem>
-              <MenuItem value="resume_project">从旧项目继续训练</MenuItem>
-            </Select>
-          </FormControl>
-          <Typography variant="body2" sx={{ opacity: 0.78 }}>
-            {trainingMode === 'piper'
-              ? '标准模式会重新做裁剪、VAD 和 ASR。'
-              : trainingMode === 'gsv_distill'
-                ? '蒸馏模式会直接从 GPT-SoVITS 说话人模型生成语料，再继续训练并导出 KIGTTS 语音包。'
-                : trainingMode === 'voxcpm_distill'
-                  ? 'VoxCPM2 蒸馏会用音色描述或参考音频生成语料，再继续训练并导出 KIGTTS 语音包。'
-                  : '从旧项目读取已保存的训练模式和参数；音频完整时直接训练，缺失时按项目配置尝试补生成。'}
-          </Typography>
-        </Stack>
-      </Paper>
+      <TrainingModeCard
+        cardPaperSx={cardPaperSx}
+        trainingMode={trainingMode}
+        pipelineRunning={pipelineRunning}
+        onTrainingModeChange={handleTrainingModeChange}
+      />
 
       {trainingMode !== 'resume_project' && (
-        <Paper sx={cardPaperSx}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between">
-            <Typography variant="subtitle1" fontWeight={600}>
-              项目与输出
-            </Typography>
-          </Stack>
-          <Box sx={{ mt: 2 }}>
-            <PathField
-              label="输出目录"
-              value={outputDir}
-              onChange={setOutputDir}
-              onPick={pickOutputDir}
-              onDropPath={handleOutputDrop}
-            />
-          </Box>
-          <Stack
-            direction={{ xs: 'column', md: 'row' }}
-            spacing={1}
-            alignItems={{ xs: 'flex-start', md: 'center' }}
-            sx={{ mt: 1 }}
-          >
-            <Button
-              variant="contained"
-              startIcon={<MsIcon name="folder_open" size={18} />}
-              onClick={openOutputDirectory}
-            >
-              打开输出目录
-            </Button>
-            <Tooltip title="缓存目录为 <输出目录>/work" arrow>
-              <Button
-                variant="contained"
-                startIcon={<MsIcon name="delete" size={18} />}
-                onClick={clearWorkCache}
-              >
-                清除工作缓存
-              </Button>
-            </Tooltip>
-          </Stack>
-        </Paper>
+        <ProjectOutputCard
+          cardPaperSx={cardPaperSx}
+          PathFieldComponent={PathField}
+          outputDir={outputDir}
+          onOutputDirChange={setOutputDir}
+          onPickOutputDir={pickOutputDir}
+          onOutputDrop={handleOutputDrop}
+          onOpenOutputDirectory={openOutputDirectory}
+          onClearWorkCache={clearWorkCache}
+        />
       )}
 
       {trainingMode === 'resume_project' ? (
