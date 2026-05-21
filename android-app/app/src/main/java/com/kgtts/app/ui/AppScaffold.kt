@@ -407,6 +407,7 @@ fun AppScaffold(viewModel: MainViewModel) {
     } else {
         false
     }
+    val xiaomiMultiWindowUsesFrameworkInsets = inMultiWindowMode && isXiaomiFamilyDevice()
     val miuiFloatingTopCompensation = 0.dp
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -435,6 +436,9 @@ fun AppScaffold(viewModel: MainViewModel) {
         WindowInsets.statusBars.getTop(this).toDp()
     }
     val topBarDesktopMaximizeInset = when {
+        // MIUI/HyperOS floating windows already offset the app content when decorFits is enabled
+        // in MainActivity. Applying caption/status insets here again creates a double top gap.
+        xiaomiMultiWindowUsesFrameworkInsets -> 0.dp
         desktopCaptionTopInset > 0.dp -> desktopCaptionTopInset
         inMultiWindowMode && statusTopInset > 0.dp -> statusTopInset
         else -> 0.dp
