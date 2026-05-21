@@ -2,16 +2,7 @@ import { Alert, Button, Chip, CircularProgress, Paper, Stack, Typography } from 
 import type { SxProps, Theme } from '@mui/material'
 import type { ComponentType } from 'react'
 import { MsIcon } from '../MsIcon'
-
-type PathFieldLikeProps = {
-  label: string
-  value: string
-  onChange: (value: string) => void
-  onPick: () => void
-  onDropPath?: (value: string) => void
-  helperText?: string
-  placeholder?: string
-}
+import type { PathFieldLikeProps } from './types'
 
 export type ResumeProjectPanelProps = {
   cardPaperSx: SxProps<Theme>

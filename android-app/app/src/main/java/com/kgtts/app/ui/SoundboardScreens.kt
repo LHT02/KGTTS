@@ -349,7 +349,9 @@ internal fun SoundboardNavHost(
     navController: NavHostController,
     viewModel: MainViewModel,
     state: UiState,
-    onEditorBatchTopBarActionsChange: (EditorBatchTopBarActions?) -> Unit
+    onEditorBatchTopBarActionsChange: (EditorBatchTopBarActions?) -> Unit,
+    ultraSmallAdaptiveWindow: Boolean = false,
+    forceLandscapeLayout: Boolean = false
 ) {
     NavHost(
         navController = navController,
@@ -411,7 +413,9 @@ internal fun SoundboardNavHost(
         composable(SoundboardRoutes.Main) {
             SoundboardScreen(
                 viewModel = viewModel,
-                onOpenEditor = { navController.navigate(SoundboardRoutes.Editor) }
+                onOpenEditor = { navController.navigate(SoundboardRoutes.Editor) },
+                ultraSmallAdaptiveWindow = ultraSmallAdaptiveWindow,
+                forceLandscapeLayout = forceLandscapeLayout
             )
         }
         composable(SoundboardRoutes.Editor) {
@@ -487,14 +491,17 @@ internal fun PresetGroupExportDialog(
 @OptIn(ExperimentalFoundationApi::class)
 internal fun SoundboardScreen(
     viewModel: MainViewModel,
-    onOpenEditor: () -> Unit
+    onOpenEditor: () -> Unit,
+    ultraSmallAdaptiveWindow: Boolean = false,
+    forceLandscapeLayout: Boolean = false
 ) {
     val configuration = LocalConfiguration.current
-    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val isLandscape = forceLandscapeLayout || configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val screenLongSideDp = maxOf(configuration.screenWidthDp, configuration.screenHeightDp)
     val screenShortSideDp = minOf(configuration.screenWidthDp, configuration.screenHeightDp)
     val phoneUa = screenShortSideDp < 600 || screenLongSideDp < 900
-    val useFullWidthLandscapeTabs = isLandscape && (!phoneUa || viewModel.uiState.forceFullWidthTabsOnPhone)
+    val useFullWidthLandscapeTabs =
+        isLandscape && !ultraSmallAdaptiveWindow && (!phoneUa || viewModel.uiState.forceFullWidthTabsOnPhone)
     val landscapeTabRailWidth = if (useFullWidthLandscapeTabs) 140.dp else 54.dp
     val navBarsPadding = WindowInsets.navigationBars.asPaddingValues()
     val navBarsBottomInset = navBarsPadding.calculateBottomPadding()

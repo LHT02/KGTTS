@@ -407,6 +407,7 @@ fun AppScaffold(viewModel: MainViewModel) {
     } else {
         false
     }
+    val xiaomiMultiWindowUsesFrameworkInsets = inMultiWindowMode && isXiaomiFamilyDevice()
     val miuiFloatingTopCompensation = 0.dp
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -435,6 +436,9 @@ fun AppScaffold(viewModel: MainViewModel) {
         WindowInsets.statusBars.getTop(this).toDp()
     }
     val topBarDesktopMaximizeInset = when {
+        // MIUI/HyperOS floating windows already offset the app content when decorFits is enabled
+        // in MainActivity. Applying caption/status insets here again creates a double top gap.
+        xiaomiMultiWindowUsesFrameworkInsets -> 0.dp
         desktopCaptionTopInset > 0.dp -> desktopCaptionTopInset
         inMultiWindowMode && statusTopInset > 0.dp -> statusTopInset
         else -> 0.dp
@@ -454,6 +458,15 @@ fun AppScaffold(viewModel: MainViewModel) {
     }
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val ultraSmallAdaptiveWindow = isUltraSmallAdaptiveWindow(
+        widthDp = configuration.screenWidthDp,
+        heightDp = configuration.screenHeightDp,
+        isLandscape = isLandscape
+    )
+    val forceLandscapeContentLayout = ultraSmallAdaptiveWindow &&
+        minOf(configuration.screenWidthDp, configuration.screenHeightDp) < 520 &&
+        (maxOf(configuration.screenWidthDp, configuration.screenHeightDp).toFloat() /
+            minOf(configuration.screenWidthDp, configuration.screenHeightDp).coerceAtLeast(1)) <= 1.42f
     val layoutDirection = LocalLayoutDirection.current
     val displayCutoutPadding = WindowInsets.displayCutout.asPaddingValues()
     val navigationBarsPadding = WindowInsets.navigationBars.asPaddingValues()
@@ -491,7 +504,7 @@ fun AppScaffold(viewModel: MainViewModel) {
     val permanentDrawerExpandedWidth = UiTokens.DrawerWidthExpanded + landscapeChromeStartInset
     val hiddenDrawerSurfaceWidth = hiddenDrawerWidth + landscapeChromeStartInset
     val usePermanentDrawer =
-        isLandscape && state.landscapeDrawerMode == UserPrefs.DRAWER_MODE_PERMANENT
+        isLandscape && !ultraSmallAdaptiveWindow && state.landscapeDrawerMode == UserPrefs.DRAWER_MODE_PERMANENT
     val basePage = page
     val quickSubtitleEditorOpen =
         basePage == pageQuickSubtitle && quickSubtitleRoute == QuickSubtitleRoutes.Editor
@@ -1939,7 +1952,9 @@ fun AppScaffold(viewModel: MainViewModel) {
                             }
                         },
                         onEditorBatchTopBarActionsChange = { quickSubtitleEditorBatchTopBarActions = it },
-                        fullscreenMode = quickSubtitleFullscreen && !quickSubtitleSubPageOpen
+                        fullscreenMode = quickSubtitleFullscreen && !quickSubtitleSubPageOpen,
+                        forceLandscapeLayout = forceLandscapeContentLayout,
+                        ultraSmallAdaptiveWindow = ultraSmallAdaptiveWindow
                     )
                     pageQuickCard -> QuickCardNavHost(
                         navController = quickCardNavController,
@@ -1951,13 +1966,16 @@ fun AppScaffold(viewModel: MainViewModel) {
                     pageDrawing -> DrawingBoardScreen(
                         viewModel = viewModel,
                         fullscreen = drawingFullscreen,
-                        onToggleFullscreen = { drawingFullscreen = !drawingFullscreen }
+                        onToggleFullscreen = { drawingFullscreen = !drawingFullscreen },
+                        forceLandscapeLayout = forceLandscapeContentLayout
                     )
                     pageSoundboard -> SoundboardNavHost(
                         navController = soundboardNavController,
                         viewModel = viewModel,
                         state = state,
-                        onEditorBatchTopBarActionsChange = { soundboardEditorBatchTopBarActions = it }
+                        onEditorBatchTopBarActionsChange = { soundboardEditorBatchTopBarActions = it },
+                        ultraSmallAdaptiveWindow = ultraSmallAdaptiveWindow,
+                        forceLandscapeLayout = forceLandscapeContentLayout
                     )
                     pageSettings -> SettingsNavHost(
                         navController = settingsNavController,
