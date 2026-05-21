@@ -489,6 +489,7 @@ class MainViewModel(
         private const val APP_REALTIME_OWNER_TAG = "app"
     }
     val drawStrokes = mutableStateListOf<DrawStrokeData>()
+    val drawRedoStrokes = mutableStateListOf<DrawStrokeData>()
     var drawColor by mutableStateOf(UiTokens.Primary)
         private set
     var drawBrushSize by mutableStateOf(12f)
@@ -3921,12 +3922,14 @@ class MainViewModel(
 
     fun clearDrawingBoard() {
         drawStrokes.clear()
+        drawRedoStrokes.clear()
     }
 
     fun appendDrawingStroke(points: List<DrawPoint>, eraserOverride: Boolean? = null) {
         if (points.size < 2) return
         val useEraser = eraserOverride ?: drawEraser
         val effectiveWidth = if (useEraser) drawEraserSize * 5f else drawBrushSize
+        drawRedoStrokes.clear()
         drawStrokes.add(
             DrawStrokeData(
                 points = points,
@@ -3935,6 +3938,16 @@ class MainViewModel(
                 eraser = useEraser
             )
         )
+    }
+
+    fun undoDrawingStroke() {
+        val stroke = drawStrokes.removeLastOrNull() ?: return
+        drawRedoStrokes.add(stroke)
+    }
+
+    fun redoDrawingStroke() {
+        val stroke = drawRedoStrokes.removeLastOrNull() ?: return
+        drawStrokes.add(stroke)
     }
 
     fun saveDrawingSnapshot() {

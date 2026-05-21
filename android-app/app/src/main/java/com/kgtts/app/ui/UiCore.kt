@@ -361,6 +361,20 @@ internal object UiTokens {
     val DarkCard = Color(0xFF1D2023)
 }
 
+internal fun isUltraSmallAdaptiveWindow(
+    widthDp: Int,
+    heightDp: Int,
+    isLandscape: Boolean
+): Boolean {
+    val shortSide = minOf(widthDp, heightDp)
+    val longSide = maxOf(widthDp, heightDp)
+    if (shortSide <= 0 || longSide <= 0) return false
+    val aspect = longSide.toFloat() / shortSide.toFloat()
+    val nearSquareSmallWindow = shortSide < 520 && longSide < 760 && aspect <= 1.42f
+    val flatTinyLandscapeWindow = isLandscape && shortSide < 430 && longSide < 760
+    return nearSquareSmallWindow || flatTinyLandscapeWindow
+}
+
 @Composable
 internal fun CenteredPageBox(
     maxWidth: Dp,

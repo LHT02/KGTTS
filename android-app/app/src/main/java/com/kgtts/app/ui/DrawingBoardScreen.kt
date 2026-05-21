@@ -349,11 +349,12 @@ import kotlin.math.roundToInt
 fun DrawingBoardScreen(
     viewModel: MainViewModel,
     fullscreen: Boolean,
-    onToggleFullscreen: () -> Unit
+    onToggleFullscreen: () -> Unit,
+    forceLandscapeLayout: Boolean = false
 ) {
     val context = LocalContext.current
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
-    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val isLandscape = forceLandscapeLayout || configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val isDark = currentAppDarkTheme()
     val state = viewModel.uiState
     val deviceRotationDegrees = when (context.display?.rotation ?: Surface.ROTATION_0) {
@@ -756,6 +757,8 @@ fun DrawingBoardScreen(
             eraserEnabled = viewModel.drawEraser,
             visible = !toolbarCollapsed,
             fullscreen = fullscreen,
+            canUndo = viewModel.drawStrokes.isNotEmpty(),
+            canRedo = viewModel.drawRedoStrokes.isNotEmpty(),
             onToggleFullscreen = onToggleFullscreen,
             onToggleCollapsed = { viewModel.updateDrawingToolbarCollapsed(!toolbarCollapsed) },
             landscapeToolbarHeight = landscapeToolbarHeight,
@@ -763,6 +766,8 @@ fun DrawingBoardScreen(
             onPickColor = { viewModel.updateDrawColor(it) },
             onBrushSize = { viewModel.updateDrawBrushSize(it) },
             onToggleEraser = { viewModel.updateDrawEraser(it) },
+            onUndo = { viewModel.undoDrawingStroke() },
+            onRedo = { viewModel.redoDrawingStroke() },
             onClear = { viewModel.clearDrawingBoard() }
         )
         DrawingToolbarMini(
@@ -787,6 +792,8 @@ internal fun DrawingToolbar(
     eraserEnabled: Boolean,
     visible: Boolean,
     fullscreen: Boolean,
+    canUndo: Boolean,
+    canRedo: Boolean,
     onToggleFullscreen: () -> Unit,
     onToggleCollapsed: () -> Unit,
     landscapeToolbarHeight: Dp,
@@ -794,6 +801,8 @@ internal fun DrawingToolbar(
     onPickColor: (Color) -> Unit,
     onBrushSize: (Float) -> Unit,
     onToggleEraser: (Boolean) -> Unit,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
     onClear: () -> Unit
 ) {
     AnimatedVisibility(
@@ -907,6 +916,20 @@ internal fun DrawingToolbar(
                             )
                         }
                         Md2ToolToggle(
+                            icon = "undo",
+                            selected = false,
+                            enabled = canUndo,
+                            onClick = onUndo,
+                            contentDescription = "撤销"
+                        )
+                        Md2ToolToggle(
+                            icon = "redo",
+                            selected = false,
+                            enabled = canRedo,
+                            onClick = onRedo,
+                            contentDescription = "重做"
+                        )
+                        Md2ToolToggle(
                             icon = "chevron_right",
                             selected = false,
                             onClick = onToggleCollapsed,
@@ -976,6 +999,20 @@ internal fun DrawingToolbar(
                             onValueChange = onBrushSize,
                             valueRange = 2f..48f,
                             modifier = Modifier.weight(1f)
+                        )
+                        Md2ToolToggle(
+                            icon = "undo",
+                            selected = false,
+                            enabled = canUndo,
+                            onClick = onUndo,
+                            contentDescription = "撤销"
+                        )
+                        Md2ToolToggle(
+                            icon = "redo",
+                            selected = false,
+                            enabled = canRedo,
+                            onClick = onRedo,
+                            contentDescription = "重做"
                         )
                         Md2ToolToggle(
                             icon = "expand_more",
@@ -1087,6 +1124,7 @@ internal fun DrawingToolbarMini(
 internal fun Md2ToolToggle(
     icon: String,
     selected: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit,
     contentDescription: String
 ) {
@@ -1094,7 +1132,9 @@ internal fun Md2ToolToggle(
     Surface(
         modifier = Modifier
             .size(36.dp)
+            .graphicsLayer { alpha = if (enabled) 1f else 0.38f }
             .clickable(
+                enabled = enabled,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = rememberRipple(bounded = true),
                 onClick = onClick

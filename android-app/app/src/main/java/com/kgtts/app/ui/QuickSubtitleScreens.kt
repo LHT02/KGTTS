@@ -354,7 +354,9 @@ internal fun QuickSubtitleNavHost(
     onFloatingInputPreviewChange: (QuickSubtitleFloatingInputPreviewState?) -> Unit,
     onOpenHistory: () -> Unit,
     onEditorBatchTopBarActionsChange: (EditorBatchTopBarActions?) -> Unit,
-    fullscreenMode: Boolean
+    fullscreenMode: Boolean,
+    forceLandscapeLayout: Boolean = false,
+    ultraSmallAdaptiveWindow: Boolean = false
 ) {
     NavHost(
         navController = navController,
@@ -424,7 +426,9 @@ internal fun QuickSubtitleNavHost(
                 onFloatingInputPreviewChange = onFloatingInputPreviewChange,
                 onOpenHistory = onOpenHistory,
                 onOpenEditor = { navController.navigate(QuickSubtitleRoutes.Editor) },
-                fullscreenMode = fullscreenMode
+                fullscreenMode = fullscreenMode,
+                forceLandscapeLayout = forceLandscapeLayout,
+                ultraSmallAdaptiveWindow = ultraSmallAdaptiveWindow
             )
         }
         composable(QuickSubtitleRoutes.Editor) {
@@ -1053,10 +1057,12 @@ fun QuickSubtitleScreen(
     onFloatingInputPreviewChange: (QuickSubtitleFloatingInputPreviewState?) -> Unit = {},
     onOpenHistory: () -> Unit,
     onOpenEditor: () -> Unit,
-    fullscreenMode: Boolean
+    fullscreenMode: Boolean,
+    forceLandscapeLayout: Boolean = false,
+    ultraSmallAdaptiveWindow: Boolean = false
 ) {
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
-    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val isLandscape = forceLandscapeLayout || configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val focusManager = LocalFocusManager.current
@@ -2461,46 +2467,106 @@ fun QuickSubtitleScreen(
                     inputFieldValue = TextFieldValue("")
                 }
             }
+            var inputActionMenuExpanded by remember { mutableStateOf(false) }
+            val moveCursorLeft = {
+                val current = inputFieldValue.selection.start.coerceIn(0, inputFieldValue.text.length)
+                val target = (current - 1).coerceAtLeast(0)
+                inputFieldValue = inputFieldValue.copy(selection = TextRange(target))
+            }
+            val moveCursorRight = {
+                val current = inputFieldValue.selection.end.coerceIn(0, inputFieldValue.text.length)
+                val target = (current + 1).coerceAtMost(inputFieldValue.text.length)
+                inputFieldValue = inputFieldValue.copy(selection = TextRange(target))
+            }
+            val togglePlayOnSend = {
+                viewModel.updateQuickSubtitlePlayOnSend(!playOnSend)
+            }
+            val toggleQuickInputCollapsed = {
+                viewModel.updateQuickSubtitleInputCollapsed(!quickInputCollapsed)
+            }
+            val replayCurrentSubtitle = {
+                viewModel.applyQuickSubtitleText(subtitleText, enqueueSpeak = hasVoice)
+            }
             val actionButtons: @Composable () -> Unit = {
                 Md2IconButton(
                     icon = "arrow_back",
                     contentDescription = "光标左移",
-                    onClick = {
-                        val current = inputFieldValue.selection.start.coerceIn(0, inputFieldValue.text.length)
-                        val target = (current - 1).coerceAtLeast(0)
-                        inputFieldValue = inputFieldValue.copy(selection = TextRange(target))
-                    }
+                    onClick = moveCursorLeft
                 )
                 Md2IconButton(
                     icon = "arrow_forward",
                     contentDescription = "光标右移",
-                    onClick = {
-                        val current = inputFieldValue.selection.end.coerceIn(0, inputFieldValue.text.length)
-                        val target = (current + 1).coerceAtMost(inputFieldValue.text.length)
-                        inputFieldValue = inputFieldValue.copy(selection = TextRange(target))
-                    }
+                    onClick = moveCursorRight
                 )
                 Md2IconButton(
                     icon = if (playOnSend) "volume_up" else "volume_off",
                     contentDescription = if (playOnSend) "发送时播放语音：开" else "发送时播放语音：关",
-                    onClick = {
-                        viewModel.updateQuickSubtitlePlayOnSend(!playOnSend)
-                    }
+                    onClick = togglePlayOnSend
                 )
                 Md2IconButton(
                     icon = if (quickInputCollapsed) "subtitles_off" else "subtitles",
                     contentDescription = if (quickInputCollapsed) "展开快捷输入区域" else "收起快捷输入区域",
-                    onClick = {
-                        viewModel.updateQuickSubtitleInputCollapsed(!quickInputCollapsed)
-                    }
+                    onClick = toggleQuickInputCollapsed
                 )
                 Md2IconButton(
                     icon = "play_arrow",
                     contentDescription = "朗读当前字幕",
-                    onClick = {
-                        viewModel.applyQuickSubtitleText(subtitleText, enqueueSpeak = hasVoice)
-                    }
+                    onClick = replayCurrentSubtitle
                 )
+            }
+            val compactActionMenu: @Composable () -> Unit = {
+                Box {
+                    Md2IconButton(
+                        icon = if (isLandscape) "more_vert" else "more_horiz",
+                        contentDescription = "更多输入操作",
+                        onClick = { inputActionMenuExpanded = true }
+                    )
+                    DropdownMenu(
+                        expanded = inputActionMenuExpanded,
+                        onDismissRequest = { inputActionMenuExpanded = false }
+                    ) {
+                        M2DropdownMenuItem(onClick = {
+                            inputActionMenuExpanded = false
+                            moveCursorLeft()
+                        }) {
+                            MsIcon("arrow_back", contentDescription = null)
+                            Spacer(Modifier.width(12.dp))
+                            Text("光标左移")
+                        }
+                        M2DropdownMenuItem(onClick = {
+                            inputActionMenuExpanded = false
+                            moveCursorRight()
+                        }) {
+                            MsIcon("arrow_forward", contentDescription = null)
+                            Spacer(Modifier.width(12.dp))
+                            Text("光标右移")
+                        }
+                        M2DropdownMenuItem(onClick = {
+                            inputActionMenuExpanded = false
+                            togglePlayOnSend()
+                        }) {
+                            MsIcon(if (playOnSend) "volume_up" else "volume_off", contentDescription = null)
+                            Spacer(Modifier.width(12.dp))
+                            Text(if (playOnSend) "发送时播放语音：开" else "发送时播放语音：关")
+                        }
+                        M2DropdownMenuItem(onClick = {
+                            inputActionMenuExpanded = false
+                            toggleQuickInputCollapsed()
+                        }) {
+                            MsIcon(if (quickInputCollapsed) "subtitles_off" else "subtitles", contentDescription = null)
+                            Spacer(Modifier.width(12.dp))
+                            Text(if (quickInputCollapsed) "展开快捷输入区域" else "收起快捷输入区域")
+                        }
+                        M2DropdownMenuItem(onClick = {
+                            inputActionMenuExpanded = false
+                            replayCurrentSubtitle()
+                        }) {
+                            MsIcon("play_arrow", contentDescription = null)
+                            Spacer(Modifier.width(12.dp))
+                            Text("朗读当前字幕")
+                        }
+                    }
+                }
             }
             Column(
                 modifier = Modifier
@@ -2524,7 +2590,7 @@ fun QuickSubtitleScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            actionButtons()
+                            if (ultraSmallAdaptiveWindow) compactActionMenu() else actionButtons()
                         }
                         OutlinedTextField(
                             value = inputFieldValue,
@@ -2597,7 +2663,7 @@ fun QuickSubtitleScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        actionButtons()
+                        if (ultraSmallAdaptiveWindow) compactActionMenu() else actionButtons()
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -2744,7 +2810,7 @@ fun QuickSubtitleScreen(
                 groups = groups,
                 initialGroupIndex = selectedGroupIndex,
                 layoutMode = quickSubtitleListDialogLayoutMode,
-                forceFullWidthTabsOnPhone = state.forceFullWidthTabsOnPhone,
+                forceFullWidthTabsOnPhone = state.forceFullWidthTabsOnPhone && !ultraSmallAdaptiveWindow,
                 onLayoutModeChange = { viewModel.updateQuickSubtitleListPopupLayout(it) },
                 onSelectGroup = { viewModel.selectQuickSubtitleGroup(it) },
                 onDismiss = { quickSubtitleListDialogVisible = false },
