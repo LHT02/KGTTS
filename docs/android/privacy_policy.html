@@ -214,7 +214,17 @@
       <p>当你主动下载语音识别资源包、Kokoro 资源包或打开下载源时，应用会访问你选择的下载源，例如魔搭、Hugging Face、HF-Mirror 或你自定义的资源地址。下载源服务器可能接收必要的网络请求信息。</p>
       <p>当你主动使用系统分享面板、打开二维码网址、跳转第三方应用、导出预设或分享日志时，相关数据会被发送给你选择的目标应用、网站或联系人。</p>
       <p>KIGTTS 使用 Android 系统组件和若干第三方开源 / 本地功能组件来完成基础功能，例如 AndroidX、CameraX、ML Kit Barcode Scanning、ZXing、ONNX Runtime、sherpa-onnx、CanHub Image Cropper、Apache Commons Compress、XZ、Material Components 等。这些组件主要用于界面、相机预览、二维码识别、模型推理、图片裁剪、压缩包处理和本地音频能力。</p>
+      <p>KIGTTS 不接入第三方广告 SDK、统计 SDK、商业推送 SDK 或个性化推荐 SDK。应用不会通过第三方 SDK 在静默状态或后台运行时收集 IMEI、IMSI、设备 MAC 地址、SUPI、SUCI、精确位置、联系人、通话记录、日历、短信、本机电话号码等信息。</p>
+      <ul>
+        <li>ONNX Runtime、sherpa-onnx：仅在语音识别、TTS、语音增强、VAD 等功能运行时参与本地模型推理，不用于上传音频或收集设备标识。</li>
+        <li>CameraX、ML Kit Barcode Scanning、ZXing：仅在你打开二维码扫描或主动选择图片识别时处理相机画面或图片内容，不在后台持续扫描。</li>
+        <li>CanHub Image Cropper：仅在你主动裁剪头像、名片图片等图片时处理所选图片。</li>
+        <li>Apache Commons Compress、XZ：仅在你主动导入、下载、安装或解压资源包、语音包、预设包时处理对应文件。</li>
+        <li>AndroidX、Material Components、MediaSession、通知和浏览器相关系统组件：仅用于界面显示、系统通知、蓝牙媒体标题字幕、Chrome Custom Tabs 或 WebView 等你主动启用的功能。</li>
+      </ul>
+      <p>上述组件处理范围限于实现对应功能所必需的数据。KIGTTS 不会主动把这些数据提供给第三方广告、统计、营销或画像服务。</p>
       <p>KIGTTS 不会出售你的个人信息，也不会在未经你同意的情况下公开披露你的个人信息。若因法律法规、行政或司法机关依法要求必须提供相关信息，我们会在符合法律要求的范围内处理。</p>
+      <p>KIGTTS 不提供广告、个性化推荐或定向推送功能，也不会使用第三方来源的个人信息进行精准营销。</p>
     </section>
 
     <section>
