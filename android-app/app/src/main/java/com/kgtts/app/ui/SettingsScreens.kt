@@ -659,7 +659,7 @@ fun SettingsScreen(
             onDismissRequest = { internalWebViewWarningVisible = false },
             title = { Text("启用内置 WebView") },
             text = {
-                Text("开启后将允许在软件内置浏览器中访问网页。\n其内容、安全性与本软件无关，相关风险由您自行承担。")
+                Text("开启后，软件内置浏览器仅允许访问 lhtstudio.com 及其子域名。\n其它第三方网页仍会通过外部浏览器打开，其内容、安全性与本软件无关，相关风险由您自行承担。")
             },
             confirmButton = {
                 Md2TextButton(
@@ -1681,7 +1681,7 @@ fun SettingsScreen(
                                 viewModel.setInternalWebViewEnabled(false)
                             }
                         },
-                        supportingText = "关闭时，二维码扫描得到的第三方网页链接会优先使用 Chrome Custom Tabs；不可用时显示外部链接提示页。"
+                        supportingText = "默认关闭。开启后，内置 WebView 也仅允许访问 lhtstudio.com 及其子域名；其它网页链接仍会优先使用 Chrome Custom Tabs 或外部浏览器。"
                     )
                 }
             }

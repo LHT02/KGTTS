@@ -1967,7 +1967,7 @@ internal fun QuickCardWebViewScreen(
         QuickCardExternalLinkPage(url = url)
         return
     }
-    if (!isWebViewAllowedUrl(url)) {
+    if (!isHttpWebUrl(url)) {
         DisposableEffect(Unit) {
             onTopBarActionsChange(null)
             onDispose { onTopBarActionsChange(null) }
@@ -1984,6 +1984,14 @@ internal fun QuickCardWebViewScreen(
                 }
             }
         )
+        return
+    }
+    if (!isWebViewAllowedUrl(url)) {
+        DisposableEffect(Unit) {
+            onTopBarActionsChange(null)
+            onDispose { onTopBarActionsChange(null) }
+        }
+        QuickCardExternalLinkPage(url = url)
         return
     }
     var loading by remember(url) { mutableStateOf(true) }
@@ -2136,7 +2144,11 @@ internal fun QuickCardWebViewScreen(
                         webView.stopLoading()
                         webError = QuickCardWebError(
                             url = url,
-                            detail = "内置 WebView 仅允许打开 http/https 页面。"
+                            detail = if (isHttpWebUrl(url)) {
+                                "该网址不在内置 WebView 白名单中，请使用外部浏览器打开。"
+                            } else {
+                                "内置 WebView 仅允许打开 http/https 页面。"
+                            }
                         )
                     }
                 }
@@ -2171,6 +2183,18 @@ internal fun QuickCardWebViewScreen(
 }
 
 internal fun isWebViewAllowedUrl(url: String): Boolean {
+    val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
+    val scheme = uri.scheme?.lowercase()
+    if (scheme != "https" && scheme != "http") return false
+    val host = uri.host
+        ?.trim()
+        ?.trimEnd('.')
+        ?.lowercase()
+        ?: return false
+    return host == "lhtstudio.com" || host.endsWith(".lhtstudio.com")
+}
+
+internal fun isHttpWebUrl(url: String): Boolean {
     val scheme = runCatching { Uri.parse(url).scheme?.lowercase() }.getOrNull()
     return scheme == "https" || scheme == "http"
 }
