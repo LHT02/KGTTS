@@ -2,7 +2,6 @@
 
 package com.lhtstudio.kigtts.app.ui
 
-import android.annotation.SuppressLint
 import android.Manifest
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
@@ -1954,7 +1953,6 @@ internal fun QuickCardScanTextScreen(
     }
 }
 
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
 internal fun QuickCardWebViewScreen(
     url: String,
@@ -1967,6 +1965,25 @@ internal fun QuickCardWebViewScreen(
             onDispose { onTopBarActionsChange(null) }
         }
         QuickCardExternalLinkPage(url = url)
+        return
+    }
+    if (!isWebViewAllowedUrl(url)) {
+        DisposableEffect(Unit) {
+            onTopBarActionsChange(null)
+            onDispose { onTopBarActionsChange(null) }
+        }
+        QuickCardWebErrorPage(
+            error = QuickCardWebError(
+                url = url,
+                detail = "内置 WebView 仅允许打开 http/https 页面。"
+            ),
+            onRetry = {},
+            onOpenExternal = {
+                if (!openExternalBrowser(it, url)) {
+                    toast(it, "无法打开系统浏览器")
+                }
+            }
+        )
         return
     }
     var loading by remember(url) { mutableStateOf(true) }
@@ -2017,17 +2034,42 @@ internal fun QuickCardWebViewScreen(
             factory = { context ->
                 WebView(context).apply {
                     webViewRef.value = this
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
+                    settings.javaScriptEnabled = false
+                    settings.javaScriptCanOpenWindowsAutomatically = false
+                    settings.domStorageEnabled = false
+                    settings.databaseEnabled = false
+                    settings.allowFileAccess = false
+                    settings.allowContentAccess = false
+                    settings.allowFileAccessFromFileURLs = false
+                    settings.allowUniversalAccessFromFileURLs = false
+                    settings.setSupportMultipleWindows(false)
+                    settings.mediaPlaybackRequiresUserGesture = true
                     settings.builtInZoomControls = true
                     settings.displayZoomControls = false
                     settings.loadWithOverviewMode = true
                     settings.useWideViewPort = true
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                        android.webkit.CookieManager.getInstance()
+                            .setAcceptThirdPartyCookies(this, false)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        settings.safeBrowsingEnabled = true
+                    }
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(
                             view: WebView?,
                             request: WebResourceRequest?
-                        ): Boolean = false
+                        ): Boolean {
+                            val targetUrl = request?.url?.toString().orEmpty()
+                            if (targetUrl.isBlank() || isWebViewAllowedUrl(targetUrl)) {
+                                return false
+                            }
+                            if (!openExternalBrowser(context, targetUrl)) {
+                                toast(context, "无法打开外部链接")
+                            }
+                            return true
+                        }
 
                         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                             loading = true
@@ -2088,7 +2130,15 @@ internal fun QuickCardWebViewScreen(
                 if (!url.equals(webView.url.orEmpty(), ignoreCase = true)) {
                     loading = true
                     webError = null
-                    webView.loadUrl(url)
+                    if (isWebViewAllowedUrl(url)) {
+                        webView.loadUrl(url)
+                    } else {
+                        webView.stopLoading()
+                        webError = QuickCardWebError(
+                            url = url,
+                            detail = "内置 WebView 仅允许打开 http/https 页面。"
+                        )
+                    }
                 }
             }
         )
@@ -2118,6 +2168,11 @@ internal fun QuickCardWebViewScreen(
             )
         }
     }
+}
+
+internal fun isWebViewAllowedUrl(url: String): Boolean {
+    val scheme = runCatching { Uri.parse(url).scheme?.lowercase() }.getOrNull()
+    return scheme == "https" || scheme == "http"
 }
 
 internal data class QuickCardWebError(
