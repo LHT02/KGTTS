@@ -379,8 +379,15 @@ fun DrawingBoardScreen(
     var viewportPanY by rememberSaveable { mutableFloatStateOf(0f) }
     val toolbarCollapsed = viewModel.drawingToolbarCollapsed
     val navigationBarBottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val mandatoryGestureBottomInset =
+        WindowInsets.mandatorySystemGestures.asPaddingValues().calculateBottomPadding()
+    val portraitBottomSystemInset = if (isLandscape) {
+        0.dp
+    } else {
+        maxOf(navigationBarBottomInset, mandatoryGestureBottomInset)
+    }
     val hasPortraitThreeButtonNav = !isLandscape && navigationBarBottomInset >= 32.dp
-    val portraitToolbarBottomInset = if (hasPortraitThreeButtonNav) navigationBarBottomInset else 0.dp
+    val portraitToolbarBottomInset = portraitBottomSystemInset
     val boardReserveEndTarget = if (isLandscape) {
         if (toolbarCollapsed) 76.dp else 128.dp
     } else {
@@ -391,9 +398,9 @@ fun DrawingBoardScreen(
     } else {
         when {
             toolbarCollapsed && hasPortraitThreeButtonNav -> 76.dp
-            toolbarCollapsed -> 66.dp
+            toolbarCollapsed -> 66.dp + portraitToolbarBottomInset
             hasPortraitThreeButtonNav -> 168.dp
-            else -> 120.dp
+            else -> 120.dp + portraitToolbarBottomInset
         }
     }
     val boardReserveEnd by animateDpAsState(
