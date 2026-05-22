@@ -536,6 +536,8 @@ fun AppScaffold(viewModel: MainViewModel) {
         basePage == pageSettings && settingsRoute == SettingsRoutes.Licenses
     val settingsPrivacyOpen =
         basePage == pageSettings && settingsRoute == SettingsRoutes.Privacy
+    val settingsAgreementOpen =
+        basePage == pageSettings && settingsRoute == SettingsRoutes.Agreement
     var lastTopBarBackClickAtMs by remember { mutableLongStateOf(0L) }
     var drawerExpanded by rememberSaveable { mutableStateOf(false) }
     val runningStripEligible = !(drawingFullscreen && basePage == pageDrawing)
@@ -788,7 +790,7 @@ fun AppScaffold(viewModel: MainViewModel) {
             soundboardSubPageOpen -> {
                 soundboardNavController.popBackStack(SoundboardRoutes.Main, inclusive = false)
             }
-            settingsLogOpen || settingsLicensesOpen || settingsPrivacyOpen -> {
+            settingsLogOpen || settingsLicensesOpen || settingsPrivacyOpen || settingsAgreementOpen -> {
                 settingsNavController.popBackStack(SettingsRoutes.Main, inclusive = false)
             }
             quickCardEditorOpen -> {
@@ -1223,6 +1225,8 @@ fun AppScaffold(viewModel: MainViewModel) {
             "开源许可证"
         } else if (settingsPrivacyOpen) {
             "隐私政策"
+        } else if (settingsAgreementOpen) {
+            "用户协议"
         } else {
             when (basePage) {
                 pageQuickSubtitle -> "便捷字幕"
@@ -1298,7 +1302,7 @@ fun AppScaffold(viewModel: MainViewModel) {
                         targetState = when {
                             quickSubtitleSubPageOpen -> 1
                             soundboardSubPageOpen -> 2
-                            settingsLogOpen || settingsLicensesOpen || settingsPrivacyOpen -> 3
+                            settingsLogOpen || settingsLicensesOpen || settingsPrivacyOpen || settingsAgreementOpen -> 3
                             quickCardSubPageOpen -> 4
                             else -> 0
                         },

@@ -426,6 +426,9 @@ internal fun SettingsNavHost(
                 onOpenPrivacy = {
                     navController.navigate(SettingsRoutes.Privacy) { launchSingleTop = true }
                 },
+                onOpenAgreement = {
+                    navController.navigate(SettingsRoutes.Agreement) { launchSingleTop = true }
+                },
                 onOpenRecognitionResourceSources = onOpenRecognitionResourceSources,
                 onPickRecognitionResourcePackage = onPickRecognitionResourcePackage,
                 onDownloadRecognitionResources = onDownloadRecognitionResources,
@@ -448,6 +451,11 @@ internal fun SettingsNavHost(
                 assetPath = "legal/privacy_policy.md"
             )
         }
+        composable(SettingsRoutes.Agreement) {
+            LegalDocumentScreen(
+                assetPath = "legal/user_agreement.md"
+            )
+        }
     }
 }
 
@@ -458,6 +466,7 @@ fun SettingsScreen(
     state: UiState,
     onOpenLicenses: () -> Unit,
     onOpenPrivacy: () -> Unit,
+    onOpenAgreement: () -> Unit,
     onOpenRecognitionResourceSources: () -> Unit,
     onPickRecognitionResourcePackage: () -> Unit,
     onDownloadRecognitionResources: () -> Unit,
@@ -886,6 +895,11 @@ fun SettingsScreen(
                         AboutDocumentRow(
                             title = "隐私政策",
                             onClick = onOpenPrivacy,
+                            showDivider = false
+                        )
+                        AboutDocumentRow(
+                            title = "用户协议",
+                            onClick = onOpenAgreement,
                             showDivider = false
                         )
                     }

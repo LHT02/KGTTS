@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.Card
 import androidx.compose.material.Checkbox
@@ -63,8 +64,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -111,6 +115,7 @@ internal fun KigttsOnboardingScreen(
     var page by rememberSaveable { mutableIntStateOf(0) }
     var privacyAccepted by rememberSaveable { mutableStateOf(false) }
     var privacyOpen by rememberSaveable { mutableStateOf(false) }
+    var agreementOpen by rememberSaveable { mutableStateOf(false) }
     var refreshToken by remember { mutableIntStateOf(0) }
     val pageCount = 3
 
@@ -185,7 +190,8 @@ internal fun KigttsOnboardingScreen(
                     0 -> OnboardingWelcomePage(
                         privacyAccepted = privacyAccepted,
                         onPrivacyAcceptedChange = { privacyAccepted = it },
-                        onOpenPrivacy = { privacyOpen = true }
+                        onOpenPrivacy = { privacyOpen = true },
+                        onOpenAgreement = { agreementOpen = true }
                     )
                     1 -> OnboardingPermissionPage(
                         refreshToken = refreshToken,
@@ -204,30 +210,19 @@ internal fun KigttsOnboardingScreen(
         }
 
         if (privacyOpen) {
-            Dialog(
-                onDismissRequest = { privacyOpen = false },
-                properties = DialogProperties(usePlatformDefaultWidth = false)
-            ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    Box(Modifier.fillMaxSize()) {
-                        LegalDocumentScreen(assetPath = "legal/privacy_policy.md")
-                        IconButton(
-                            onClick = { privacyOpen = false },
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .statusBarsPadding()
-                                .padding(12.dp)
-                                .clip(CircleShape)
-                                .background(md2CardContainerColor())
-                        ) {
-                            MsIcon("close", contentDescription = "关闭隐私政策")
-                        }
-                    }
-                }
-            }
+            OnboardingLegalDialog(
+                assetPath = "legal/privacy_policy.md",
+                closeDescription = "关闭隐私政策",
+                onDismiss = { privacyOpen = false }
+            )
+        }
+
+        if (agreementOpen) {
+            OnboardingLegalDialog(
+                assetPath = "legal/user_agreement.md",
+                closeDescription = "关闭用户协议",
+                onDismiss = { agreementOpen = false }
+            )
         }
     }
 }
@@ -308,28 +303,50 @@ private fun OnboardingPageFrame(
 private fun OnboardingWelcomePage(
     privacyAccepted: Boolean,
     onPrivacyAcceptedChange: (Boolean) -> Unit,
-    onOpenPrivacy: () -> Unit
+    onOpenPrivacy: () -> Unit,
+    onOpenAgreement: () -> Unit
 ) {
     OnboardingCard {
         OnboardingLogo()
         Text(
-            text = "欢迎使用 KIGTTS",
+            text = "欢迎使用",
             style = MaterialTheme.typography.h4,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
         Text(
-            text = "这是一套面向 kigurumi 玩家和现场交流场景的辅助工具。你可以用它显示大字幕、管理快捷文本、展示名片、播放音效，并按需开启悬浮窗和热键。",
+            text = "KIGTTS 会把字幕、朗读、名片、音效、画板和悬浮入口整合在一起，帮助你在不方便说话、现场嘈杂或需要快速互动时更顺手地表达。",
             style = MaterialTheme.typography.body1,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
         Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
         Text(
-            text = "使用前请阅读并确认隐私政策。涉及麦克风、相机、悬浮窗、通知、无障碍等能力时，KIGTTS 会在对应功能入口再次说明用途并由你主动授权。",
+            text = "使用前请阅读并确认《KIGTTS隐私政策》和《KIGTTS用户协议》。涉及麦克风、相机、悬浮窗、通知、无障碍等能力时，KIGTTS 会在对应功能入口再次说明用途并由你主动授权。",
             style = MaterialTheme.typography.body2,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Md2OutlinedButton(
+                onClick = onOpenPrivacy,
+                modifier = Modifier.weight(1f)
+            ) {
+                MsIcon("policy", contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("隐私政策")
+            }
+            Md2OutlinedButton(
+                onClick = onOpenAgreement,
+                modifier = Modifier.weight(1f)
+            ) {
+                MsIcon("contract", contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("用户协议")
+            }
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -338,19 +355,11 @@ private fun OnboardingWelcomePage(
                 checked = privacyAccepted,
                 onCheckedChange = onPrivacyAcceptedChange
             )
-            Text(
-                text = "我已阅读并同意 KIGTTS 隐私政策",
+            OnboardingAgreementText(
                 modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.body2
+                onOpenPrivacy = onOpenPrivacy,
+                onOpenAgreement = onOpenAgreement
             )
-        }
-        Md2OutlinedButton(
-            onClick = onOpenPrivacy,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            MsIcon("policy", contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text("查看完整隐私政策")
         }
     }
 }
@@ -370,7 +379,7 @@ private fun OnboardingPermissionPage(
         MsIcon(
             name = "admin_panel_settings",
             contentDescription = null,
-            modifier = Modifier.size(42.dp),
+            modifier = Modifier.size(76.dp),
             tint = MaterialTheme.colorScheme.primary
         )
         Text(
@@ -380,7 +389,7 @@ private fun OnboardingPermissionPage(
             textAlign = TextAlign.Center
         )
         Text(
-            text = "这些权限都不是必须一次性开启。你可以先跳过，后续使用对应功能时再授权。",
+            text = "下列权限可帮助你使用语音识别、扫码、悬浮提示等能力。这些权限都不是必须一次性开启，你可以先跳过，后续使用对应功能时再授权。",
             style = MaterialTheme.typography.body2,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -429,7 +438,7 @@ private fun OnboardingDonePage() {
         MsIcon(
             name = "check_circle",
             contentDescription = null,
-            modifier = Modifier.size(54.dp),
+            modifier = Modifier.size(76.dp),
             tint = MaterialTheme.colorScheme.primary
         )
         Text(
@@ -439,17 +448,84 @@ private fun OnboardingDonePage() {
             textAlign = TextAlign.Center
         )
         Text(
-            text = "基础引导已经完成。接下来可以先从便捷字幕开始，也可以在设置中继续调整语音识别、TTS、悬浮窗、音效板和快捷名片。",
+            text = "你已经完成基础准备。接下来可以先从便捷字幕开始，也可以继续配置语音识别、TTS、悬浮窗、音效板和快捷名片。",
             style = MaterialTheme.typography.body1,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
         Text(
-            text = "只有点击“开始使用”后，KIGTTS 才会记录本次引导已完成；如果在前两页退出，下次启动仍会继续显示引导。",
+            text = "点击“开始使用”后即可进入主界面。之后你仍然可以在设置中查看协议、调整权限和修改功能配置。",
             style = MaterialTheme.typography.body2,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
+    }
+}
+
+@Composable
+private fun OnboardingAgreementText(
+    modifier: Modifier,
+    onOpenPrivacy: () -> Unit,
+    onOpenAgreement: () -> Unit
+) {
+    val linkColor = MaterialTheme.colorScheme.primary
+    val textColor = MaterialTheme.colorScheme.onSurface
+    val text = buildAnnotatedString {
+        append("我已阅读并同意 ")
+        pushStringAnnotation(tag = "privacy", annotation = "privacy")
+        withStyle(SpanStyle(color = linkColor, fontWeight = FontWeight.SemiBold)) {
+            append("《KIGTTS隐私政策》")
+        }
+        pop()
+        append(" 和 ")
+        pushStringAnnotation(tag = "agreement", annotation = "agreement")
+        withStyle(SpanStyle(color = linkColor, fontWeight = FontWeight.SemiBold)) {
+            append("《KIGTTS用户协议》")
+        }
+        pop()
+    }
+    ClickableText(
+        text = text,
+        modifier = modifier,
+        style = MaterialTheme.typography.body2.copy(color = textColor),
+        onClick = { offset ->
+            when {
+                text.getStringAnnotations("privacy", offset, offset).isNotEmpty() -> onOpenPrivacy()
+                text.getStringAnnotations("agreement", offset, offset).isNotEmpty() -> onOpenAgreement()
+            }
+        }
+    )
+}
+
+@Composable
+private fun OnboardingLegalDialog(
+    assetPath: String,
+    closeDescription: String,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                LegalDocumentScreen(assetPath = assetPath)
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(12.dp)
+                        .clip(CircleShape)
+                        .background(md2CardContainerColor())
+                ) {
+                    MsIcon("close", contentDescription = closeDescription)
+                }
+            }
+        }
     }
 }
 

@@ -936,6 +936,7 @@ internal object SettingsRoutes {
     const val Log = "settings/log"
     const val Licenses = "settings/licenses"
     const val Privacy = "settings/privacy"
+    const val Agreement = "settings/agreement"
 }
 
 internal val SoundboardAudioFileExtensions = setOf(
