@@ -376,11 +376,9 @@ private fun OnboardingPermissionPage(
     @Suppress("UNUSED_VARIABLE")
     val ignoredRefresh = refreshToken
     OnboardingCard {
-        MsIcon(
+        OnboardingHeroIcon(
             name = "admin_panel_settings",
-            contentDescription = null,
-            modifier = Modifier.size(76.dp),
-            tint = MaterialTheme.colorScheme.primary
+            contentDescription = null
         )
         Text(
             text = "权限开启引导",
@@ -435,11 +433,9 @@ private fun OnboardingPermissionPage(
 private fun OnboardingDonePage() {
     OnboardingCard {
         OnboardingLogo()
-        MsIcon(
+        OnboardingHeroIcon(
             name = "check_circle",
-            contentDescription = null,
-            modifier = Modifier.size(76.dp),
-            tint = MaterialTheme.colorScheme.primary
+            contentDescription = null
         )
         Text(
             text = "大功告成",
@@ -561,6 +557,27 @@ private fun OnboardingLogo() {
             .fillMaxWidth(0.62f)
             .height(72.dp)
     )
+}
+
+@Composable
+private fun OnboardingHeroIcon(
+    name: String,
+    contentDescription: String?
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(104.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        MsIcon(
+            name = name,
+            contentDescription = contentDescription,
+            modifier = Modifier.size(96.dp),
+            tint = MaterialTheme.colorScheme.primary,
+            iconSize = 88.dp
+        )
+    }
 }
 
 @Composable

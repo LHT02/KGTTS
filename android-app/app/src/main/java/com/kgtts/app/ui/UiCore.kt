@@ -787,13 +787,14 @@ internal fun MsIcon(
     name: String,
     contentDescription: String?,
     modifier: Modifier = Modifier,
-    tint: Color = LocalContentColor.current
+    tint: Color = LocalContentColor.current,
+    iconSize: Dp = 24.dp
 ) {
     val fontScaleBlockMode = LocalFontScaleBlockMode.current
     val iconTextSize = if (fontScaleBlockMode == UserPrefs.FONT_SCALE_BLOCK_NONE) {
-        24.sp
+        iconSize.value.sp
     } else {
-        with(LocalDensity.current) { 24.dp.toSp() }
+        with(LocalDensity.current) { iconSize.toSp() }
     }
     val a11yModifier = if (contentDescription != null) {
         modifier.semantics { this.contentDescription = contentDescription }
