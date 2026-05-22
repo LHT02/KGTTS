@@ -1719,7 +1719,7 @@ fun SettingsScreen(
                         title = "蓝牙媒体标题字幕",
                         checked = state.bluetoothMediaTitleSubtitle,
                         onCheckedChange = { viewModel.setBluetoothMediaTitleSubtitle(it) },
-                        supportingText = "实验性兼容模式。开启后会把当前字幕写入系统媒体标题，部分蓝牙歌词屏、车机或小屏会把它显示为歌名；可能覆盖其它媒体标题。"
+                        supportingText = "实验性兼容模式。开启后会在前台、后台或息屏时把当前上屏大字幕写入系统媒体会话标题，用于蓝牙歌词屏、车机或小屏显示；可能覆盖其它媒体标题，关闭后停止同步。"
                     )
                     Md2SettingSwitchRow(
                         title = "实时通知",
@@ -1739,7 +1739,7 @@ fun SettingsScreen(
                                 viewModel.setLiveSubtitleNotificationEnabled(enabled)
                             }
                         },
-                        supportingText = "开启后通知会显示当前上屏的大字幕，短状态同步顶部状态面板，并提供播放文本、打开便捷字幕和关闭实时通知操作；支持 Android 16+ Live Updates 请求。"
+                        supportingText = "开启后会在前台、后台或锁屏时通过系统通知显示当前上屏大字幕和短状态，并提供播放文本、打开便捷字幕和关闭实时通知操作；关闭后停止更新。"
                     )
                 }
             }

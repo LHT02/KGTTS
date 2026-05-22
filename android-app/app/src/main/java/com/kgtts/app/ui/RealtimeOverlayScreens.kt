@@ -622,7 +622,7 @@ fun FloatingOverlayScreen(
                     Text("锁屏时显示悬浮窗")
                 }
                 Text(
-                    "开启后会尝试让悬浮窗在锁屏界面上显示并响应操作。部分系统还需要在系统权限中允许锁屏显示或后台弹出界面。",
+                    "开启后，悬浮窗可能在后台、锁屏或息屏状态继续显示并响应操作；应用会在本地更新悬浮窗位置、展开状态和当前显示文本。部分系统还需要允许锁屏显示或后台弹出界面。",
                     style = MaterialTheme.typography.bodySmall
                 )
                 Spacer(Modifier.height(8.dp))
@@ -635,7 +635,7 @@ fun FloatingOverlayScreen(
         Md2StaggeredFloatIn(index = 1) {
             Md2SettingsCard(title = "音量热键") {
                 Text(
-                    "序列监听由独立服务处理，不挂在现有悬浮窗服务上。开启无障碍稳定监听后，会优先直接读取音量键事件；未授权时会自动回退到系统音量变化判定。",
+                    "序列监听由独立服务处理，不挂在现有悬浮窗服务上。开启后可能在后台或锁屏状态读取系统音量变化；开启无障碍稳定监听后，会优先读取音量键事件。读取范围仅用于判断你配置的音量键序列。",
                     style = MaterialTheme.typography.bodySmall
                 )
                 Spacer(Modifier.height(8.dp))
@@ -766,7 +766,7 @@ fun FloatingOverlayScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("部分系统由于设计原因，首次点按音量键时只会弹出音量调整控件，并不会真正调整音量。")
                     Text("未开启无障碍稳定监听时，KIGTTS 只能通过系统音量数值变化判断按键序列，可能需要多按几次音量键才能触发。")
-                    Text("开启无障碍稳定监听后，可以直接读取音量键事件，触发会更稳定。")
+                    Text("开启无障碍稳定监听后，应用会在后台或锁屏状态读取音量键事件，用于判断热键序列；不会读取输入内容、账号密码、支付信息或其它应用文本。")
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -892,9 +892,9 @@ fun FloatingOverlayScreen(
             title = { Text("启用无障碍稳定监听") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("KIGTTS 会通过无障碍服务更稳定地监听音量键上下序列，用来触发你配置的音量热键功能。")
+                    Text("KIGTTS 会通过无障碍服务在前台、后台或锁屏状态更稳定地监听音量键上下序列，用来触发你配置的音量热键功能。")
                     Text("该服务还会在你主动打开 QQ 扫一扫时读取 QQ 界面节点并执行点击手势，用于直达 QQ 扫码页。")
-                    Text("除上述热键和 QQ 扫一扫直达外，不会读取其它应用内容，也不会替你点击其它流程。")
+                    Text("除上述热键和 QQ 扫一扫直达外，不会读取其它应用内容、输入内容、账号密码或支付信息，也不会替你点击其它流程。")
                     Text("确认后会进入系统无障碍页面，请找到“KIGTTS 音量热键辅助”并开启。若已授予悬浮窗权限，会同时显示一个可拖动的步骤提示窗。")
                 }
             },
