@@ -44,6 +44,7 @@ class RecognitionResourceRepository(private val context: Context) {
         installRoot.mkdirs()
         cacheRoot.mkdirs()
         cleanupStaleImports()
+        cleanupStaleCache()
     }
 
     fun status(): RecognitionResourceStatus {
@@ -104,16 +105,14 @@ class RecognitionResourceRepository(private val context: Context) {
         val ext = archiveExtensionFromUrl(normalizedUrl)
         val temp = File(cacheRoot, "download-${System.currentTimeMillis()}.$ext")
         AppLogger.i("Recognition resources download url=$normalizedUrl temp=${temp.absolutePath}")
-        var installStarted = false
         try {
             downloadToFile(normalizedUrl, temp, onProgress)
-            installStarted = true
             return installArchiveFile(temp, deleteArchiveOnSuccess = true, onProgress = onProgress)
         } catch (e: Exception) {
             AppLogger.e("Recognition resources download/install failed", e)
             throw e
         } finally {
-            if (!installStarted && temp.exists()) temp.delete()
+            if (temp.exists()) temp.delete()
         }
     }
 
@@ -545,6 +544,21 @@ class RecognitionResourceRepository(private val context: Context) {
         root.listFiles()
             ?.filter { it.isDirectory && it.name.startsWith(".import-") }
             ?.forEach { it.deleteRecursively() }
+    }
+
+    private fun cleanupStaleCache() {
+        cacheRoot.listFiles()
+            ?.filter { child ->
+                child.name.startsWith("download-") ||
+                    child.name.startsWith("local-")
+            }
+            ?.forEach { child ->
+                if (child.isDirectory) {
+                    child.deleteRecursively()
+                } else {
+                    child.delete()
+                }
+            }
     }
 
     private fun archiveExtensionFromUrl(url: String): String {

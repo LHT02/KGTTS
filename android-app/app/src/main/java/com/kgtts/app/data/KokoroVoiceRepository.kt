@@ -45,6 +45,7 @@ class KokoroVoiceRepository(private val context: Context) {
     init {
         root.mkdirs()
         cacheRoot.mkdirs()
+        cleanupStaleCache()
     }
 
     fun voiceDir(): File = installDir
@@ -477,6 +478,22 @@ class KokoroVoiceRepository(private val context: Context) {
             .replace(Regex("[\\\\/:*?\"<>|]"), "_")
             .trim('.')
             .ifBlank { "kokoro-voice.zip" }
+    }
+
+    private fun cleanupStaleCache() {
+        cacheRoot.listFiles()
+            ?.filter { child ->
+                child.name.startsWith("local-") ||
+                    child.name.startsWith(".import-") ||
+                    child.name.startsWith(".download-")
+            }
+            ?.forEach { child ->
+                if (child.isDirectory) {
+                    child.deleteRecursively()
+                } else {
+                    child.delete()
+                }
+            }
     }
 
     private data class RemoteFile(

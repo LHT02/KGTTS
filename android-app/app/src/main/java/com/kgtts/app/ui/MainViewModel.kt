@@ -245,6 +245,7 @@ import com.lhtstudio.kigtts.app.audio.VadMode
 import com.lhtstudio.kigtts.app.data.ModelRepository
 import com.lhtstudio.kigtts.app.data.RecognitionResourceProgress
 import com.lhtstudio.kigtts.app.data.RecognitionResourceStatus
+import com.lhtstudio.kigtts.app.data.ResourceStorageCleaner
 import com.lhtstudio.kigtts.app.data.KokoroVoiceStatus
 import com.lhtstudio.kigtts.app.data.SoundboardGroup
 import com.lhtstudio.kigtts.app.data.SoundboardItem
@@ -563,6 +564,9 @@ class MainViewModel(
     private var quickCardsSaving = false
 
     init {
+        viewModelScope.launch(Dispatchers.IO) {
+            ResourceStorageCleaner.cleanupTransientStorage(appContext)
+        }
         loadQuickSubtitleConfig()
         loadSoundboardConfig()
         loadQuickCardConfig()
@@ -3104,6 +3108,7 @@ class MainViewModel(
         }
         viewModelScope.launch(Dispatchers.IO) {
             val shareDir = File(appContext.cacheDir, "share")
+            ResourceStorageCleaner.cleanupShareCache(appContext)
             val fileName = "${repo.sanitizeVoicePackShareName(pack.meta.name, pack.dir.name)}.kigvpk"
             val outZip = File(shareDir, fileName)
             repo.zipVoicePack(pack.dir, outZip)

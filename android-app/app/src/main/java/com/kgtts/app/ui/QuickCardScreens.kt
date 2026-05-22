@@ -253,6 +253,7 @@ import com.lhtstudio.kigtts.app.data.SYSTEM_TTS_VOICE_NAME
 import com.lhtstudio.kigtts.app.data.VoicePackInfo
 import com.lhtstudio.kigtts.app.data.UserPrefs
 import com.lhtstudio.kigtts.app.data.VoicePackMeta
+import com.lhtstudio.kigtts.app.data.ResourceStorageCleaner
 import com.lhtstudio.kigtts.app.data.defaultSoundboardGroups
 import com.lhtstudio.kigtts.app.data.isKokoroVoiceDir
 import com.lhtstudio.kigtts.app.data.isSystemTtsVoiceDir
@@ -4195,6 +4196,7 @@ internal fun shareQuickCard(context: Context, card: QuickCard, landscape: Boolea
             val source = if (imagePath.isBlank()) null else File(imagePath)
             if (source != null && source.exists()) {
                 val shareDir = File(context.cacheDir, "share")
+                ResourceStorageCleaner.cleanupShareCache(context)
                 if (!shareDir.exists()) shareDir.mkdirs()
                 val out = File(shareDir, "quick_card_${System.currentTimeMillis()}.png")
                 source.copyTo(out, overwrite = true)

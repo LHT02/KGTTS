@@ -256,6 +256,7 @@ import com.lhtstudio.kigtts.app.data.SYSTEM_TTS_VOICE_NAME
 import com.lhtstudio.kigtts.app.data.VoicePackInfo
 import com.lhtstudio.kigtts.app.data.UserPrefs
 import com.lhtstudio.kigtts.app.data.VoicePackMeta
+import com.lhtstudio.kigtts.app.data.ResourceStorageCleaner
 import com.lhtstudio.kigtts.app.data.defaultSoundboardGroups
 import com.lhtstudio.kigtts.app.data.isKokoroVoiceDir
 import com.lhtstudio.kigtts.app.data.isSystemTtsVoiceDir
@@ -350,6 +351,7 @@ internal fun toast(context: android.content.Context, msg: String) {
 
 internal fun writeQuickSubtitlePresetPackage(context: Context, groups: List<QuickSubtitleGroup>): File {
     require(groups.isNotEmpty()) { "未选择需要导出的分组" }
+    ResourceStorageCleaner.cleanupShareCache(context)
     val shareDir = File(context.cacheDir, "share").apply { mkdirs() }
     val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
     val out = File(shareDir, "quick_subtitle_$ts.kigtpk")

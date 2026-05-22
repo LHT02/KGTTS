@@ -126,6 +126,7 @@ object SoundboardPresetIo {
     fun exportPackage(context: Context, config: SoundboardConfig, selectedGroupIds: Set<Long>): File {
         val groups = config.groups.filter { it.id in selectedGroupIds }
         require(groups.isNotEmpty()) { "未选择需要导出的分组" }
+        ResourceStorageCleaner.cleanupShareCache(context)
         val shareDir = File(context.cacheDir, "share").apply { mkdirs() }
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val out = File(shareDir, "soundboard_$ts.kigspk")
@@ -191,95 +192,99 @@ object SoundboardPresetIo {
 
     fun importPackage(context: Context, uri: Uri, current: SoundboardConfig): SoundboardConfig {
         val tempDir = File(context.cacheDir, "soundboard_import_${System.currentTimeMillis()}").apply { mkdirs() }
-        val audioFiles = linkedMapOf<String, File>()
-        val json = try {
-            var jsonPayload: String? = null
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                ZipInputStream(input).use { zis ->
-                    while (true) {
-                        val entry = zis.nextEntry ?: break
-                        val safeName = entry.name.replace('\\', '/').trimStart('/')
-                        if (entry.isDirectory || safeName.contains("../")) {
+        try {
+            val audioFiles = linkedMapOf<String, File>()
+            val json = try {
+                var jsonPayload: String? = null
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    ZipInputStream(input).use { zis ->
+                        while (true) {
+                            val entry = zis.nextEntry ?: break
+                            val safeName = entry.name.replace('\\', '/').trimStart('/')
+                            if (entry.isDirectory || safeName.contains("../")) {
+                                zis.closeEntry()
+                                continue
+                            }
+                            when {
+                                safeName == PRESET_JSON -> {
+                                    jsonPayload = zis.readBytes().toString(Charsets.UTF_8)
+                                }
+                                safeName.startsWith("audio/") -> {
+                                    val out = File(tempDir, safeName.substringAfterLast('/'))
+                                    out.parentFile?.mkdirs()
+                                    out.outputStream().use { zis.copyTo(it) }
+                                    audioFiles[safeName] = out
+                                }
+                            }
                             zis.closeEntry()
-                            continue
                         }
-                        when {
-                            safeName == PRESET_JSON -> {
-                                jsonPayload = zis.readBytes().toString(Charsets.UTF_8)
-                            }
-                            safeName.startsWith("audio/") -> {
-                                val out = File(tempDir, safeName.substringAfterLast('/'))
-                                out.parentFile?.mkdirs()
-                                out.outputStream().use { zis.copyTo(it) }
-                                audioFiles[safeName] = out
-                            }
-                        }
-                        zis.closeEntry()
                     }
-                }
-            } ?: error("无法打开预设包")
-            jsonPayload ?: error("预设包缺少 preset.json")
-        } catch (_: java.util.zip.ZipException) {
-            context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
-                ?: error("无法打开预设包")
-        }
+                } ?: error("无法打开预设包")
+                jsonPayload ?: error("预设包缺少 preset.json")
+            } catch (_: java.util.zip.ZipException) {
+                context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                    ?: error("无法打开预设包")
+            }
 
-        val root = JSONObject(json)
-        require(root.optString("type") == SOUNDBOARD_TYPE) { "不是音效板预设包" }
-        val existingTitles = current.groups.map { it.title }.toMutableSet()
-        var nextGroupId = (current.groups.maxOfOrNull { it.id } ?: 0L) + 1L
-        var nextItemId = current.groups.asSequence()
-            .flatMap { it.items.asSequence() }
-            .maxOfOrNull { it.id }
-            ?.plus(1L) ?: 1L
-        val importedGroups = mutableListOf<SoundboardGroup>()
-        val groupsArray = root.optJSONArray("groups") ?: JSONArray()
-        for (i in 0 until groupsArray.length()) {
-            val groupObj = groupsArray.optJSONObject(i) ?: continue
-            val title = uniqueImportedGroupTitle(
-                groupObj.optString("title", "未命名分组"),
-                existingTitles
-            )
-            existingTitles += title
-            val itemsArray = groupObj.optJSONArray("items") ?: JSONArray()
-            val items = mutableListOf<SoundboardItem>()
-            for (j in 0 until itemsArray.length()) {
-                val itemObj = itemsArray.optJSONObject(j) ?: continue
-                val audioEntry = itemObj.optString("audioFile", "")
-                val importedAudio = audioFiles[audioEntry]
-                val storedAudioPath = if (importedAudio != null && importedAudio.exists()) {
-                    val out = File(
-                        audioDir(context),
-                        "${sanitizeFileSegment(itemObj.optString("title", "audio"))}_${UUID.randomUUID()}.${importedAudio.extension.ifBlank { "audio" }}"
+            val root = JSONObject(json)
+            require(root.optString("type") == SOUNDBOARD_TYPE) { "不是音效板预设包" }
+            val existingTitles = current.groups.map { it.title }.toMutableSet()
+            var nextGroupId = (current.groups.maxOfOrNull { it.id } ?: 0L) + 1L
+            var nextItemId = current.groups.asSequence()
+                .flatMap { it.items.asSequence() }
+                .maxOfOrNull { it.id }
+                ?.plus(1L) ?: 1L
+            val importedGroups = mutableListOf<SoundboardGroup>()
+            val groupsArray = root.optJSONArray("groups") ?: JSONArray()
+            for (i in 0 until groupsArray.length()) {
+                val groupObj = groupsArray.optJSONObject(i) ?: continue
+                val title = uniqueImportedGroupTitle(
+                    groupObj.optString("title", "未命名分组"),
+                    existingTitles
+                )
+                existingTitles += title
+                val itemsArray = groupObj.optJSONArray("items") ?: JSONArray()
+                val items = mutableListOf<SoundboardItem>()
+                for (j in 0 until itemsArray.length()) {
+                    val itemObj = itemsArray.optJSONObject(j) ?: continue
+                    val audioEntry = itemObj.optString("audioFile", "")
+                    val importedAudio = audioFiles[audioEntry]
+                    val storedAudioPath = if (importedAudio != null && importedAudio.exists()) {
+                        val out = File(
+                            audioDir(context),
+                            "${sanitizeFileSegment(itemObj.optString("title", "audio"))}_${UUID.randomUUID()}.${importedAudio.extension.ifBlank { "audio" }}"
+                        )
+                        importedAudio.copyTo(out, overwrite = true)
+                        out.absolutePath
+                    } else {
+                        ""
+                    }
+                    items += SoundboardItem(
+                        id = nextItemId++,
+                        title = itemObj.optString("title", "新音效").trim().ifBlank { "新音效" },
+                        wakeWord = itemObj.optString("wakeWord", "").trim(),
+                        audioPath = storedAudioPath,
+                        durationMs = itemObj.optLong("durationMs", 0L).coerceAtLeast(0L),
+                        trimStartMs = itemObj.optLong("trimStartMs", 0L).coerceAtLeast(0L),
+                        trimEndMs = itemObj.optLong("trimEndMs", 0L).coerceAtLeast(0L)
                     )
-                    importedAudio.copyTo(out, overwrite = true)
-                    out.absolutePath
-                } else {
-                    ""
                 }
-                items += SoundboardItem(
-                    id = nextItemId++,
-                    title = itemObj.optString("title", "新音效").trim().ifBlank { "新音效" },
-                    wakeWord = itemObj.optString("wakeWord", "").trim(),
-                    audioPath = storedAudioPath,
-                    durationMs = itemObj.optLong("durationMs", 0L).coerceAtLeast(0L),
-                    trimStartMs = itemObj.optLong("trimStartMs", 0L).coerceAtLeast(0L),
-                    trimEndMs = itemObj.optLong("trimEndMs", 0L).coerceAtLeast(0L)
+                importedGroups += SoundboardGroup(
+                    id = nextGroupId++,
+                    title = title,
+                    icon = groupObj.optString("icon", "music_note").ifBlank { "music_note" },
+                    keywordWakeEnabled = groupObj.optBoolean("keywordWakeEnabled", true),
+                    items = items
                 )
             }
-            importedGroups += SoundboardGroup(
-                id = nextGroupId++,
-                title = title,
-                icon = groupObj.optString("icon", "music_note").ifBlank { "music_note" },
-                keywordWakeEnabled = groupObj.optBoolean("keywordWakeEnabled", true),
-                items = items
+            require(importedGroups.isNotEmpty()) { "预设包没有可导入分组" }
+            return current.copy(
+                groups = current.groups + importedGroups,
+                selectedGroupId = importedGroups.first().id
             )
+        } finally {
+            tempDir.deleteRecursively()
         }
-        require(importedGroups.isNotEmpty()) { "预设包没有可导入分组" }
-        return current.copy(
-            groups = current.groups + importedGroups,
-            selectedGroupId = importedGroups.first().id
-        )
     }
 
     fun sanitizeFileSegment(raw: String): String {

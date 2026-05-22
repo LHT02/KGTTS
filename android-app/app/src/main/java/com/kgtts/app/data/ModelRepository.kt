@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.Context
 import android.database.Cursor
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.net.Uri
@@ -53,6 +54,7 @@ class ModelRepository(private val context: Context) {
         root.mkdirs()
         asrRoot.mkdirs()
         voiceRoot.mkdirs()
+        cleanupStaleVoiceImports()
     }
 
     fun importAsr(uri: Uri, resolver: ContentResolver): File {
@@ -67,6 +69,17 @@ class ModelRepository(private val context: Context) {
     fun importVoice(uri: Uri, resolver: ContentResolver): File {
         val targetDir = File(voiceRoot, safeName(uri, resolver))
         val importDir = File(voiceRoot, ".import-${System.currentTimeMillis()}")
+        val preservedMeta = readVoiceMeta(targetDir)
+        val preservedAvatar = preservedMeta
+            ?.avatar
+            ?.takeIf { it.isNotBlank() }
+            ?.let { File(targetDir, it) }
+            ?.takeIf { it.isFile }
+            ?.let { source ->
+                File(context.cacheDir, "voice-avatar-${System.currentTimeMillis()}.tmp").also { temp ->
+                    source.copyTo(temp, overwrite = true)
+                }
+            }
         if (importDir.exists()) {
             importDir.deleteRecursively()
         }
@@ -84,13 +97,23 @@ class ModelRepository(private val context: Context) {
                 importDir.copyRecursively(targetDir, overwrite = true)
                 importDir.deleteRecursively()
             }
-            ensureVoiceMeta(targetDir)
+            if (preservedMeta != null) {
+                val avatarName = sanitizeMetaFileName(preservedMeta.avatar, "avatar.png")
+                if (preservedAvatar?.isFile == true) {
+                    preservedAvatar.copyTo(File(targetDir, avatarName), overwrite = true)
+                }
+                saveVoiceMeta(targetDir, preservedMeta.copy(avatar = avatarName))
+            } else {
+                ensureVoiceMeta(targetDir)
+            }
             AppLogger.i("importVoice done target=${targetDir.absolutePath}")
             return targetDir
         } catch (e: Exception) {
             importDir.deleteRecursively()
             AppLogger.e("importVoice failed uri=$uri", e)
             throw e
+        } finally {
+            preservedAvatar?.delete()
         }
     }
 
@@ -159,16 +182,17 @@ class ModelRepository(private val context: Context) {
     }
 
     fun saveVoiceMeta(dir: File, meta: VoicePackMeta) {
+        val normalized = normalizeVoiceMeta(dir, meta)
         val file = metaFile(dir)
         val json = JSONObject().apply {
-            put("name", meta.name)
-            put("remark", meta.remark)
-            put("avatar", meta.avatar)
-            put("pinned", meta.pinned)
-            put("order", meta.order)
+            put("name", normalized.name)
+            put("remark", normalized.remark)
+            put("avatar", normalized.avatar)
+            put("pinned", normalized.pinned)
+            put("order", normalized.order)
         }
-        file.writeText(json.toString(2), Charsets.UTF_8)
-        ensureAvatar(dir, meta.avatar)
+        writeTextAtomically(file, json.toString(2))
+        ensureAvatar(dir, normalized.avatar)
     }
 
     fun updateVoiceMeta(dir: File, updater: (VoicePackMeta) -> VoicePackMeta) {
@@ -178,14 +202,24 @@ class ModelRepository(private val context: Context) {
     }
 
     fun updateVoiceAvatar(dir: File, resolver: ContentResolver, uri: Uri, fileName: String = "avatar.png") {
-        val out = File(dir, fileName)
-        resolver.openInputStream(uri)?.use { input ->
-            FileOutputStream(out).use { output ->
-                input.copyTo(output)
-            }
+        val safeFileName = sanitizeMetaFileName(fileName, "avatar.png")
+        val bitmap = decodeAvatarBitmap(resolver, uri)
+            ?: throw IOException("无法读取头像图片")
+        val out = File(dir, safeFileName)
+        val tmp = File(dir, "$safeFileName.tmp")
+        tmp.parentFile?.mkdirs()
+        FileOutputStream(tmp).use { output ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+        }
+        if (out.exists() && !out.delete()) {
+            throw IOException("无法更新头像文件")
+        }
+        if (!tmp.renameTo(out)) {
+            tmp.copyTo(out, overwrite = true)
+            tmp.delete()
         }
         updateVoiceMeta(dir) { meta ->
-            meta.copy(avatar = fileName)
+            meta.copy(avatar = safeFileName)
         }
     }
 
@@ -197,10 +231,12 @@ class ModelRepository(private val context: Context) {
 
     fun zipVoicePack(dir: File, outZip: File) {
         outZip.parentFile?.mkdirs()
+        ensureVoiceMeta(dir)
         ZipOutputStream(FileOutputStream(outZip)).use { zos ->
             dir.walkTopDown().forEach { file ->
                 if (file.isDirectory) return@forEach
                 val entryName = dir.toPath().relativize(file.toPath()).toString().replace('\\', '/')
+                if (entryName == "${META_FILE_NAME}.tmp" || entryName == "${META_FILE_NAME}.bak") return@forEach
                 val entry = ZipEntry(entryName)
                 zos.putNextEntry(entry)
                 file.inputStream().use { input -> input.copyTo(zos) }
@@ -348,37 +384,128 @@ class ModelRepository(private val context: Context) {
         }
     }
 
-    private fun metaFile(dir: File): File = File(dir, "voicepack.json")
+    private fun metaFile(dir: File): File = File(dir, META_FILE_NAME)
+
+    private fun backupMetaFile(dir: File): File = File(dir, "$META_FILE_NAME.bak")
 
     private fun ensureVoiceMeta(dir: File): VoicePackMeta {
-        val file = metaFile(dir)
-        val parsed = if (file.exists()) {
-            try {
-                val json = JSONObject(file.readText(Charsets.UTF_8))
-                VoicePackMeta(
-                    name = json.optString("name", "未命名").ifBlank { "未命名" },
-                    remark = json.optString("remark", ""),
-                    avatar = json.optString("avatar", "avatar.png"),
-                    pinned = json.optBoolean("pinned", false),
-                    order = json.optLong("order", System.currentTimeMillis())
-                )
-            } catch (_: Exception) {
-                VoicePackMeta()
-            }
-        } else {
-            VoicePackMeta()
-        }
-        saveVoiceMeta(dir, parsed)
-        return parsed
+        val parsed = readVoiceMeta(dir)
+            ?: readVoiceMetaFile(backupMetaFile(dir))
+            ?: deriveVoiceMeta(dir)
+        val normalized = normalizeVoiceMeta(dir, parsed)
+        saveVoiceMeta(dir, normalized)
+        return normalized
     }
 
     private fun ensureAvatar(dir: File, fileName: String) {
-        val file = File(dir, fileName)
-        if (file.exists()) return
+        val safeFileName = sanitizeMetaFileName(fileName, "avatar.png")
+        val file = File(dir, safeFileName)
+        if (file.isFile && BitmapFactory.decodeFile(file.absolutePath) != null) return
         val bmp = Bitmap.createBitmap(400, 400, Bitmap.Config.ARGB_8888)
         Canvas(bmp).apply { drawColor(Color.parseColor("#B0B0B0")) }
         FileOutputStream(file).use { out ->
             bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
         }
+    }
+
+    private fun readVoiceMeta(dir: File): VoicePackMeta? = readVoiceMetaFile(metaFile(dir))
+
+    private fun readVoiceMetaFile(file: File): VoicePackMeta? {
+        if (!file.isFile) return null
+        return try {
+            val json = JSONObject(file.readText(Charsets.UTF_8))
+            VoicePackMeta(
+                name = json.optString("name", "").trim(),
+                remark = json.optString("remark", "").trim(),
+                avatar = json.optString("avatar", "avatar.png").trim(),
+                pinned = json.optBoolean("pinned", false),
+                order = json.optLong("order", System.currentTimeMillis())
+            )
+        } catch (e: Exception) {
+            AppLogger.e("readVoiceMeta failed file=${file.absolutePath}", e)
+            null
+        }
+    }
+
+    private fun deriveVoiceMeta(dir: File): VoicePackMeta {
+        val manifest = runCatching {
+            JSONObject(File(dir, "manifest.json").readText(Charsets.UTF_8))
+        }.getOrNull()
+        val derivedName = listOf(
+            manifest?.optString("name"),
+            manifest?.optString("title"),
+            manifest?.optString("voice"),
+            dir.name
+        ).firstOrNull { !it.isNullOrBlank() } ?: "未命名"
+        return VoicePackMeta(name = derivedName.trim())
+    }
+
+    private fun normalizeVoiceMeta(dir: File, meta: VoicePackMeta): VoicePackMeta {
+        val fallbackName = deriveVoiceMeta(dir).name.ifBlank { "未命名" }
+        return meta.copy(
+            name = meta.name.trim().ifBlank { fallbackName },
+            remark = meta.remark.trim(),
+            avatar = sanitizeMetaFileName(meta.avatar, "avatar.png"),
+            order = meta.order.takeIf { it >= 0L } ?: System.currentTimeMillis()
+        )
+    }
+
+    private fun writeTextAtomically(file: File, content: String) {
+        file.parentFile?.mkdirs()
+        val backup = File(file.parentFile, "${file.name}.bak")
+        val currentLooksValid = file.isFile && runCatching {
+            JSONObject(file.readText(Charsets.UTF_8))
+            true
+        }.getOrDefault(false)
+        if (currentLooksValid) {
+            runCatching { file.copyTo(backup, overwrite = true) }
+        }
+        val tmp = File(file.parentFile, "${file.name}.tmp")
+        tmp.writeText(content, Charsets.UTF_8)
+        if (file.exists() && !file.delete()) {
+            tmp.delete()
+            throw IOException("无法更新语音包元数据")
+        }
+        if (!tmp.renameTo(file)) {
+            tmp.copyTo(file, overwrite = true)
+            tmp.delete()
+        }
+    }
+
+    private fun sanitizeMetaFileName(name: String, fallback: String): String {
+        return name
+            .replace('\\', '/')
+            .substringAfterLast('/')
+            .trim()
+            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            .trim('.')
+            .ifBlank { fallback }
+    }
+
+    private fun decodeAvatarBitmap(resolver: ContentResolver, uri: Uri): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        resolver.openInputStream(uri)?.use { input ->
+            BitmapFactory.decodeStream(input, null, bounds)
+        }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val maxSize = 512
+        var sampleSize = 1
+        while (bounds.outWidth / sampleSize > maxSize || bounds.outHeight / sampleSize > maxSize) {
+            sampleSize *= 2
+        }
+        val opts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        return resolver.openInputStream(uri)?.use { input ->
+            BitmapFactory.decodeStream(input, null, opts)
+        }
+    }
+
+    private fun cleanupStaleVoiceImports() {
+        voiceRoot.listFiles()
+            ?.filter { it.isDirectory && it.name.startsWith(".import-") }
+            ?.forEach { it.deleteRecursively() }
+    }
+
+    companion object {
+        private const val META_FILE_NAME = "voicepack.json"
     }
 }
