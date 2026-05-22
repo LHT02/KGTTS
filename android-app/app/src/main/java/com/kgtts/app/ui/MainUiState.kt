@@ -345,6 +345,7 @@ import kotlin.math.roundToInt
 
 
 data class UiState(
+    val settingsLoaded: Boolean = false,
     val asrDir: File? = null,
     val voiceDir: File? = null,
     val voicePacks: List<VoicePackInfo> = emptyList(),
@@ -401,6 +402,7 @@ data class UiState(
     val overlayThemeMode: Int = UserPrefs.THEME_MODE_FOLLOW_SYSTEM,
     val fontScaleBlockMode: Int = UserPrefs.FONT_SCALE_BLOCK_ICONS_ONLY,
     val hapticFeedbackEnabled: Boolean = true,
+    val onboardingCompleted: Boolean = false,
     val forceFullWidthTabsOnPhone: Boolean = false,
     val soundboardGridFullWidth: Boolean = false,
     val internalWebViewEnabled: Boolean = false,

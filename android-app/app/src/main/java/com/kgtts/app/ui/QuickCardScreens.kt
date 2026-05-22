@@ -607,6 +607,7 @@ internal fun QuickCardMainScreen(
     }
     val onCreateCardState = rememberUpdatedState(onCreateCard)
     val onOpenScannerState = rememberUpdatedState(onOpenScanner)
+    var cameraPermissionDialogOpen by rememberSaveable { mutableStateOf(false) }
     val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) {
             onOpenScannerState.value()
@@ -624,7 +625,31 @@ internal fun QuickCardMainScreen(
                 if (granted) {
                     onOpenScannerState.value()
                 } else {
-                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                    cameraPermissionDialogOpen = true
+                }
+            }
+        )
+    }
+    if (cameraPermissionDialogOpen) {
+        AlertDialog(
+            onDismissRequest = { cameraPermissionDialogOpen = false },
+            title = { Text("需要相机权限") },
+            text = {
+                Text("扫一扫需要使用相机预览画面来识别二维码。识别过程在本机完成，KIGTTS 不会上传相机画面或二维码截图。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        cameraPermissionDialogOpen = false
+                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                    }
+                ) {
+                    Text("允许并继续")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { cameraPermissionDialogOpen = false }) {
+                    Text("取消")
                 }
             }
         )
@@ -1474,6 +1499,20 @@ internal fun QuickCardScannerScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    var cameraPermissionGranted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
+        )
+    }
+    var cameraPermissionDialogOpen by rememberSaveable { mutableStateOf(!cameraPermissionGranted) }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        cameraPermissionGranted = granted
+        if (!granted) {
+            toast(context, "未授予相机权限")
+            onOpenFailed()
+        }
+    }
     val previewView = remember(context) {
         PreviewView(context).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
@@ -1516,6 +1555,46 @@ internal fun QuickCardScannerScreen(
         onTopBarActionsChange(null)
     }
 
+    DisposableEffect(scanner, analyzerExecutor) {
+        onDispose {
+            runCatching { scanner.close() }
+            analyzerExecutor.shutdown()
+        }
+    }
+
+    if (cameraPermissionDialogOpen && !cameraPermissionGranted) {
+        AlertDialog(
+            onDismissRequest = {
+                cameraPermissionDialogOpen = false
+                onOpenFailed()
+            },
+            title = { Text("需要相机权限") },
+            text = {
+                Text("扫一扫需要使用相机预览画面来识别二维码。识别过程在本机完成，KIGTTS 不会上传相机画面或二维码截图。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        cameraPermissionDialogOpen = false
+                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                    }
+                ) {
+                    Text("允许并继续")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        cameraPermissionDialogOpen = false
+                        onOpenFailed()
+                    }
+                ) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
     DisposableEffect(previewView, scaleDetector) {
         previewView.setOnTouchListener { _, event ->
             scaleDetector.onTouchEvent(event)
@@ -1526,7 +1605,10 @@ internal fun QuickCardScannerScreen(
         }
     }
 
-    DisposableEffect(previewView, lifecycleOwner) {
+    DisposableEffect(previewView, lifecycleOwner, cameraPermissionGranted) {
+        if (!cameraPermissionGranted) {
+            onDispose {}
+        } else {
         disposed.set(false)
         scanned.set(false)
         analyzing.set(false)
@@ -1636,8 +1718,7 @@ internal fun QuickCardScannerScreen(
                 }
             }
             analyzing.set(false)
-            runCatching { scanner.close() }
-            analyzerExecutor.shutdown()
+        }
         }
     }
 

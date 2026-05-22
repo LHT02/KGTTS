@@ -113,6 +113,7 @@ object UserPrefs {
     private val KEY_OVERLAY_THEME_MODE = intPreferencesKey("overlay_theme_mode")
     private val KEY_FONT_SCALE_BLOCK_MODE = intPreferencesKey("font_scale_block_mode")
     private val KEY_HAPTIC_FEEDBACK_ENABLED = booleanPreferencesKey("haptic_feedback_enabled")
+    private val KEY_ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
     private val KEY_FORCE_FULL_WIDTH_TABS_ON_PHONE =
         booleanPreferencesKey("force_full_width_tabs_on_phone")
     private val KEY_SOUNDBOARD_GRID_FULL_WIDTH =
@@ -219,6 +220,7 @@ object UserPrefs {
         val overlayThemeMode: Int = THEME_MODE_FOLLOW_SYSTEM,
         val fontScaleBlockMode: Int = FONT_SCALE_BLOCK_ICONS_ONLY,
         val hapticFeedbackEnabled: Boolean = true,
+        val onboardingCompleted: Boolean = false,
         val forceFullWidthTabsOnPhone: Boolean = false,
         val soundboardGridFullWidth: Boolean = false,
         val internalWebViewEnabled: Boolean = false,
@@ -426,6 +428,7 @@ object UserPrefs {
                 this[KEY_FONT_SCALE_BLOCK_MODE] ?: FONT_SCALE_BLOCK_ICONS_ONLY
             ),
             hapticFeedbackEnabled = this[KEY_HAPTIC_FEEDBACK_ENABLED] ?: true,
+            onboardingCompleted = this[KEY_ONBOARDING_COMPLETED] ?: false,
             forceFullWidthTabsOnPhone = this[KEY_FORCE_FULL_WIDTH_TABS_ON_PHONE] ?: false,
             soundboardGridFullWidth = this[KEY_SOUNDBOARD_GRID_FULL_WIDTH] ?: false,
             internalWebViewEnabled = this[KEY_INTERNAL_WEBVIEW_ENABLED] ?: false,
@@ -727,6 +730,12 @@ object UserPrefs {
     suspend fun setHapticFeedbackEnabled(context: Context, enabled: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[KEY_HAPTIC_FEEDBACK_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setOnboardingCompleted(context: Context, completed: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_ONBOARDING_COMPLETED] = completed
         }
     }
 

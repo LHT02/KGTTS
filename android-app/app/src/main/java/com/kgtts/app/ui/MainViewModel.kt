@@ -800,6 +800,7 @@ class MainViewModel(
             "AEC3 诊断：未启用"
         }
         uiState = uiState.copy(
+            settingsLoaded = true,
             muteWhilePlaying = settings.muteWhilePlaying,
             muteWhilePlayingDelaySec = settings.muteWhilePlayingDelaySec,
             echoSuppression = settings.echoSuppression,
@@ -838,6 +839,7 @@ class MainViewModel(
             overlayThemeMode = settings.overlayThemeMode,
             fontScaleBlockMode = settings.fontScaleBlockMode,
             hapticFeedbackEnabled = settings.hapticFeedbackEnabled,
+            onboardingCompleted = settings.onboardingCompleted,
             forceFullWidthTabsOnPhone = settings.forceFullWidthTabsOnPhone,
             soundboardGridFullWidth = settings.soundboardGridFullWidth,
             internalWebViewEnabled = settings.internalWebViewEnabled,
@@ -3824,6 +3826,13 @@ class MainViewModel(
         uiState = uiState.copy(hapticFeedbackEnabled = enabled)
         viewModelScope.launch {
             UserPrefs.setHapticFeedbackEnabled(appContext, enabled)
+        }
+    }
+
+    fun completeOnboarding() {
+        uiState = uiState.copy(onboardingCompleted = true)
+        viewModelScope.launch {
+            UserPrefs.setOnboardingCompleted(appContext, true)
         }
     }
 
